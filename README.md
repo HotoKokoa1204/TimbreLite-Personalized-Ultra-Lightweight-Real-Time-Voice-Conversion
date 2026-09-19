@@ -58,8 +58,8 @@ src/timbre_lite/
 │   └── prosody.py         # In-graph prosody extraction head (F0 / Voicing)
 ├── runtime/               # Low-latency execution runtime
 │   ├── cuda_graph.py      # CUDA Graph capturer and static memory runner
-│   ├── ring_buffer.py     # Thread-safe lock-free audio circular ring buffer
-│   └── wasapi.py          # WASAPI low-latency audio capture/playback wrapper
+│   ├── ring_buffer.py     # Thread-safe SPSC ring buffer (mutex-protected prototype)
+│   └── wasapi.py          # WASAPI audio engine runtime abstraction
 └── benchmark/             # Validation and profiling suites
     ├── contention.py      # Multi-tier concurrent contention benchmark
     ├── pareto.py          # Bottleneck compression and efficiency sweep
@@ -113,8 +113,13 @@ TimbreLite's core architectural hypotheses are verified through rigorous automat
 - **H1 (Parameter Budget)**: Adapter architecture achieves $\approx 107\text{K}$ parameters in 64-dim bottleneck configuration (verified $< 250\text{K}$ limit).
 - **H2 (Prosody Decoupling)**: In-graph prosody head extracts $F_0$ and voicing within latent space (0 external CPU pitch tracker calls).
 - **H3 (Contention Telemetry)**: Concurrent compute contention simulation exhibits $< 0.5\text{ ms}$ tail latency variance ($\Delta P99$) and $< 1.0\%$ 1% Low FPS degradation. Real-world DirectX/Vulkan game trace validation is conducted during hardware deployment.
-- **H4 (Causal Streaming Invariant)**: Stateful causal codec achieves machine-precision streaming equivalence ($\max |y_{stream} - y_{batch}| < 1\times 10^{-4}$) and bit-exact counterfactual causality ($\Delta = 0.0$).
+- **H4 (Causal Streaming Invariant)**: Stateful causal codec achieves streaming equivalence (observed divergence $\approx 8.61\times 10^{-6}$ against test acceptance threshold $< 1\times 10^{-4}$) and bit-exact counterfactual causality ($\Delta = 0.0$).
 - **H5 (Zero-GPU Gating)**: Session controller issues `IDLE_SKIP` directives with 0 CUDA launches during silence and micro-pauses.
+
+### ⚠️ Engineering Transparency & Runtime Roadmap
+- **SPSC Ring Buffer**: Current implementation (`ring_buffer.py`) is a thread-safe mutex-protected SPSC circular buffer; native atomic lock-free index exchange is scheduled for the C++ deployment phase.
+- **WASAPI Engine**: `wasapi.py` provides a high-fidelity Python runtime abstraction modeling the MMCSS Pro Audio and IAudioClient3 protocols; native Windows COM bindings belong to the production C++ host.
+- **CUDA Graph Runner**: Telemetry in `cuda_graph.py` records end-to-end wall-clock runner latency including host copy and synchronization. Stateful zero-allocation graph fusion across all modules is scheduled for production export.
 
 ---
 

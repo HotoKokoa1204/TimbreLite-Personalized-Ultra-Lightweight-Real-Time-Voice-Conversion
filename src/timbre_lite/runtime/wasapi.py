@@ -1,4 +1,4 @@
-"""WASAPI IAudioClient3 audio engine abstraction with MMCSS priority."""
+"""WASAPI audio engine runtime abstraction for low-period audio pipelines."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class EngineStatus(str, Enum):
 
 @dataclass
 class WASAPIConfig:
-    """Configuration parameters for Windows WASAPI audio engine.
+    """Configuration parameters for Windows WASAPI audio engine abstraction.
 
     Attributes:
         sample_rate: Audio sample rate in Hz (default 24000).
@@ -36,10 +36,12 @@ class WASAPIConfig:
 
 
 class WASAPIEngine:
-    """Low-latency audio engine connecting WASAPI via lock-free ring buffers.
+    """Audio engine runtime abstraction modeling WASAPI low-period pipelines.
 
-    Models Windows MMCSS Pro Audio real-time thread scheduling with zero dynamic
-    memory allocations and bounded latency elasticity.
+    Simulates Windows MMCSS Pro Audio real-time thread scheduling protocol
+    with pre-allocated ring buffers and bounded latency elasticity. Note: This
+    is a Python runtime abstraction; direct Windows COM (IAudioClient3 / IMMDevice)
+    bindings are scheduled for the native C++ deployment phase.
     """
 
     def __init__(self, config: WASAPIConfig | None = None) -> None:

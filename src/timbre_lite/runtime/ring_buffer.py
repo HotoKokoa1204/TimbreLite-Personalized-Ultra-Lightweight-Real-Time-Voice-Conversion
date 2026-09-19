@@ -1,4 +1,4 @@
-"""Lock-free Single-Producer Single-Consumer (SPSC) ring buffer for real-time audio."""
+"""Thread-safe SPSC ring buffer for real-time audio."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ import torch
 
 
 class SPSCRingBuffer:
-    """Thread-safe lock-free ring buffer for single producer and single consumer.
+    """Thread-safe mutex-protected ring buffer for single producer and single consumer.
 
     Operates with pre-allocated static tensors to eliminate dynamic memory
     allocations in the real-time audio thread, providing jitter elasticity.
+    Note: Current implementation utilizes threading.Lock; native lock-free
+    atomic index exchange is scheduled for the C++ native runtime phase.
     """
 
     def __init__(

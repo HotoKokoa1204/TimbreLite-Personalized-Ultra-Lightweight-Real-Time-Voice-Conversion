@@ -121,7 +121,11 @@ class CUDAGraphRunner:
                 self.static_output_b = self.module(self.static_input_b)
 
     def execute_chunk(self, chunk: torch.Tensor) -> torch.Tensor:
-        """Execute single inference step recording precise latency.
+        """Execute single inference step recording wall-clock runner latency.
+
+        Note: Recorded timing measures end-to-end wall-clock runner latency
+        (including tensor copy, graph replay, and synchronization). Pure
+        asynchronous kernel execution time on GPU is profiled via CUDA Events.
 
         Args:
             chunk: Input audio chunk tensor matching input_shape.
