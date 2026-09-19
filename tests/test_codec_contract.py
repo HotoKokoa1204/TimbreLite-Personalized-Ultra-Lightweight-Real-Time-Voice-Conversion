@@ -106,72 +106,100 @@ def test_identity_adapter_passthrough(
 def test_strict_causality_zero_lookahead(
     encodec_candidate: EnCodec24kCandidate,
 ) -> None:
-    """Test 4: Strict causality verifying altering future has 0 past impact."""
+    """Test 4: Counterfactual zero-lookahead causality test.
+
+    Proves that altering future frames c2 -> c2' has exactly zero impact
+    on past representations [z0, z1] and past synthesized waveforms [y0, y1]
+    across both streaming execution and batch execution.
+    """
     torch.manual_seed(123)
     c0 = torch.randn(1, 1, 320)
     c1 = torch.randn(1, 1, 320)
-    c2_future = torch.randn(1, 1, 320) * 10.0
+    c2 = torch.randn(1, 1, 320)
+    c2_future = torch.randn(1, 1, 320) * 10.0  # Counterfactual perturbation
 
-    state1 = encodec_candidate.init_state()
-    z0_run1, state1 = encodec_candidate.encode_chunk(c0, state1)
-    y0_run1, _ = encodec_candidate.decode_chunk(z0_run1, state1)
+    # Stream A: [c0, c1, c2]
+    state_a = encodec_candidate.init_state()
+    z0_a, state_a = encodec_candidate.encode_chunk(c0, state_a)
+    y0_a, state_a = encodec_candidate.decode_chunk(z0_a, state_a)
+    z1_a, state_a = encodec_candidate.encode_chunk(c1, state_a)
+    y1_a, state_a = encodec_candidate.decode_chunk(z1_a, state_a)
+    z2_a, state_a = encodec_candidate.encode_chunk(c2, state_a)
+    y2_a, state_a = encodec_candidate.decode_chunk(z2_a, state_a)
 
-    z1_run1, state1 = encodec_candidate.encode_chunk(c1, state1)
-    y1_run1, _ = encodec_candidate.decode_chunk(z1_run1, state1)
+    # Stream B: [c0, c1, c2_future]
+    state_b = encodec_candidate.init_state()
+    z0_b, state_b = encodec_candidate.encode_chunk(c0, state_b)
+    y0_b, state_b = encodec_candidate.decode_chunk(z0_b, state_b)
+    z1_b, state_b = encodec_candidate.encode_chunk(c1, state_b)
+    y1_b, state_b = encodec_candidate.decode_chunk(z1_b, state_b)
+    z2_b, state_b = encodec_candidate.encode_chunk(c2_future, state_b)
+    y2_b, state_b = encodec_candidate.decode_chunk(z2_b, state_b)
 
-    state2 = encodec_candidate.init_state()
-    z0_run2, state2 = encodec_candidate.encode_chunk(c0, state2)
-    y0_run2, _ = encodec_candidate.decode_chunk(z0_run2, state2)
+    # Future was altered: c2 != c2_future -> z2_a != z2_b, y2_a != y2_b
+    assert (z2_a - z2_b).abs().max().item() > 0.1
+    assert (y2_a - y2_b).abs().max().item() > 0.1
 
-    z1_run2, state2 = encodec_candidate.encode_chunk(c1, state2)
-    y1_run2, _ = encodec_candidate.decode_chunk(z1_run2, state2)
+    # Strict zero-lookahead invariant: past must be bit-exact identical
+    assert (z0_a - z0_b).abs().max().item() == 0.0
+    assert (z1_a - z1_b).abs().max().item() == 0.0
+    assert (y0_a - y0_b).abs().max().item() == 0.0
+    assert (y1_a - y1_b).abs().max().item() == 0.0
 
-    _, _ = encodec_candidate.encode_chunk(c2_future, state2)
+    # Batch counterfactual verification: x_a = [c0, c1, c2], x_b = [c0, c1, c2_future]
+    x_a = torch.cat([c0, c1, c2], dim=-1)
+    x_b = torch.cat([c0, c1, c2_future], dim=-1)
+    with torch.no_grad():
+        z_batch_a = encodec_candidate.model.encoder(x_a)
+        z_batch_b = encodec_candidate.model.encoder(x_b)
+        y_batch_a = encodec_candidate.model.decoder(z_batch_a)
+        y_batch_b = encodec_candidate.model.decoder(z_batch_b)
 
-    max_abs_diff_z = (z1_run1 - z1_run2).abs().max().item()
-    mean_abs_diff_z = (z1_run1 - z1_run2).abs().mean().item()
-    max_abs_diff_y = (y1_run1 - y1_run2).abs().max().item()
-    mean_abs_diff_y = (y1_run1 - y1_run2).abs().mean().item()
+    # Future frames differ
+    assert (z_batch_a[:, :, 2:] - z_batch_b[:, :, 2:]).abs().max().item() > 0.1
+    assert (y_batch_a[:, :, 640:] - y_batch_b[:, :, 640:]).abs().max().item() > 0.1
 
-    assert max_abs_diff_z == 0.0
-    assert mean_abs_diff_z == 0.0
-    assert max_abs_diff_y == 0.0
-    assert mean_abs_diff_y == 0.0
+    # Causal batch invariant: past 2 frames [0..640] have zero future leakage
+    diff_z_past = (z_batch_a[:, :, :2] - z_batch_b[:, :, :2]).abs().max().item()
+    diff_y_past = (y_batch_a[:, :, :640] - y_batch_b[:, :, :640]).abs().max().item()
+    assert diff_z_past < 1e-5, f"Batch encoder future leaked into past: {diff_z_past}"
+    assert diff_y_past < 1e-5, f"Batch decoder future leaked into past: {diff_y_past}"
 
 
 def test_adversarial_future_perturbation_causality(
     encodec_candidate: EnCodec24kCandidate,
 ) -> None:
-    """Test 5: Adversarial causality with DC +1.0 and high-frequency spikes."""
+    """Test 5: Counterfactual causality under extreme adversarial future inputs."""
     torch.manual_seed(777)
     c0 = torch.randn(1, 1, 320)
     c1 = torch.randn(1, 1, 320)
+    c2_clean = torch.randn(1, 1, 320)
 
-    # Extreme adversarial future chunks
-    c2_dc = torch.ones(1, 1, 320)
-    c2_nyquist = torch.tensor([1.0, -1.0] * 160, dtype=torch.float32).view(1, 1, 320)
-
-    # Baseline stream: c0 -> c1
+    # Baseline stream: [c0, c1, c2_clean]
     state_base = encodec_candidate.init_state()
     z0_base, state_base = encodec_candidate.encode_chunk(c0, state_base)
-    y0_base, _ = encodec_candidate.decode_chunk(z0_base, state_base)
+    y0_base, state_base = encodec_candidate.decode_chunk(z0_base, state_base)
     z1_base, state_base = encodec_candidate.encode_chunk(c1, state_base)
-    y1_base, _ = encodec_candidate.decode_chunk(z1_base, state_base)
+    y1_base, state_base = encodec_candidate.decode_chunk(z1_base, state_base)
+    _, _ = encodec_candidate.encode_chunk(c2_clean, state_base)
+
+    # Extreme adversarial future chunks
+    c2_dc = torch.ones(1, 1, 320) * 50.0
+    c2_nyquist = torch.tensor([50.0, -50.0] * 160, dtype=torch.float32).view(1, 1, 320)
 
     for future_adv in [c2_dc, c2_nyquist]:
         state_adv = encodec_candidate.init_state()
         z0_adv, state_adv = encodec_candidate.encode_chunk(c0, state_adv)
-        y0_adv, _ = encodec_candidate.decode_chunk(z0_adv, state_adv)
+        y0_adv, state_adv = encodec_candidate.decode_chunk(z0_adv, state_adv)
         z1_adv, state_adv = encodec_candidate.encode_chunk(c1, state_adv)
-        y1_adv, _ = encodec_candidate.decode_chunk(z1_adv, state_adv)
-
-        # Feed adversarial future
+        y1_adv, state_adv = encodec_candidate.decode_chunk(z1_adv, state_adv)
         _, _ = encodec_candidate.encode_chunk(future_adv, state_adv)
 
-        max_diff = (y1_base - y1_adv).abs().max().item()
-        mean_diff = (y1_base - y1_adv).abs().mean().item()
-        assert max_diff == 0.0
-        assert mean_diff == 0.0
+        # Invariant: past frames remain exactly bit-identical
+        assert (z0_base - z0_adv).abs().max().item() == 0.0
+        assert (z1_base - z1_adv).abs().max().item() == 0.0
+        assert (y0_base - y0_adv).abs().max().item() == 0.0
+        assert (y1_base - y1_adv).abs().max().item() == 0.0
 
 
 def test_latent_manifold_perturbation_robustness(
@@ -274,6 +302,13 @@ def test_chunk_streaming_state_continuity(
     energy_in = torch.mean(x**2).item()
     energy_out = torch.mean(y_stream**2).item()
     assert energy_out > 0.01 * energy_in
+
+    # Mathematical streaming equivalence against batch full pass
+    y_batch = encodec_candidate.forward_full(x, bypass_quantizer=True)
+    diff = (y_stream - y_batch).abs().max().item()
+    assert diff < 1e-4, (
+        f"Streaming reconstruction diverged from batch pass: max diff = {diff}"
+    )
 
 
 def test_memory_footprint_stability(

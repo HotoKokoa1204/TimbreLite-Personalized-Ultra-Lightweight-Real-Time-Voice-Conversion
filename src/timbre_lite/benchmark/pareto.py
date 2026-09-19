@@ -27,8 +27,8 @@ class ParetoDataPoint:
     parameter_count: int
     mean_latency_ms: float
     p95_latency_ms: float
-    speaker_similarity: float
-    phonetic_preservation: float
+    speaker_similarity: float | None = None
+    phonetic_preservation: float | None = None
 
 
 class ParetoCompressionSuite:
@@ -97,19 +97,15 @@ class ParetoCompressionSuite:
         mean_lat = sum(sorted_l) / len(sorted_l)
         p95_lat = sorted_l[int(len(sorted_l) * 0.95)]
 
-        # Simulated quality metrics based on channel capacity
-        # Larger dimensions preserve marginally more phonetic nuance
-        # while smaller dimensions achieve lower latency and parameter counts
-        phonetic_score = min(1.0, 0.85 + (dim / 128.0) * 0.14)
-        sim_score = min(1.0, 0.82 + (dim / 128.0) * 0.15)
-
+        # Quality scores require trained persona model checkpoints evaluated on target
+        # test sets; synthetic formulaic scores are prohibited for research integrity.
         return ParetoDataPoint(
             bottleneck_dim=dim,
             parameter_count=param_count,
             mean_latency_ms=mean_lat,
             p95_latency_ms=p95_lat,
-            speaker_similarity=sim_score,
-            phonetic_preservation=phonetic_score,
+            speaker_similarity=None,
+            phonetic_preservation=None,
         )
 
     def run_sweep(self) -> list[ParetoDataPoint]:

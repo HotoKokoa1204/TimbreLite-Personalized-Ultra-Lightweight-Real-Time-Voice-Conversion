@@ -10,6 +10,7 @@ import torch.nn as nn
 
 from timbre_lite.codec.contract import CodecContract
 from timbre_lite.codec.state import CodecState
+from timbre_lite.codec.stateful import StatefulSEANetDecoder, StatefulSEANetEncoder
 
 
 class StreamingCodec(nn.Module, abc.ABC):
@@ -165,21 +166,22 @@ class EnCodec24kCandidate(StreamingCodec):
     distributed by Meta Research.
     """
 
-    def __init__(self, buffer_chunks: int = 12) -> None:
-        """Initialize EnCodec 24kHz model with streaming buffer configuration.
-
-        Args:
-            buffer_chunks: Number of historical chunks to retain in the streaming
-                encoder receptive field buffer. 12 chunks = 160 ms history.
-        """
+    def __init__(self) -> None:
+        """Initialize EnCodec 24kHz model with stateful causal streaming engines."""
         super().__init__()
         import encodec
 
         self.model = encodec.model.EncodecModel.encodec_model_24khz()
         self.model.eval()
+        self.model.requires_grad_(False)
 
-        self.buffer_chunks = buffer_chunks
-        self.buffer_samples = buffer_chunks * 320
+        # Enforce constant padding mode for true zero-lookahead temporal causality
+        for m in self.model.modules():
+            if hasattr(m, "pad_mode"):
+                m.pad_mode = "constant"
+
+        self.stream_encoder = StatefulSEANetEncoder(self.model.encoder)
+        self.stream_decoder = StatefulSEANetDecoder(self.model.decoder)
 
         self._contract = CodecContract(
             name="EnCodec_24kHz_Causal",
@@ -207,13 +209,12 @@ class EnCodec24kCandidate(StreamingCodec):
             device: Target torch device.
 
         Returns:
-            Fresh CodecState with zero-initialized history buffers.
+            Fresh CodecState with zero-initialized streaming buffers.
         """
         dev = device if device is not None else next(self.parameters()).device
         state = CodecState()
-        state.encoder_conv_states["audio_history"] = torch.zeros(
-            batch_size, 1, self.buffer_samples, device=dev
-        )
+        self.stream_encoder.init_state(state, batch_size=batch_size, device=dev)
+        self.stream_decoder.init_state(state, batch_size=batch_size, device=dev)
         return state
 
     def encode_chunk(
@@ -221,9 +222,12 @@ class EnCodec24kCandidate(StreamingCodec):
     ) -> tuple[torch.Tensor, CodecState]:
         """Encode 320-sample audio chunk into 128-d continuous latent vector.
 
+        Executes true stateful causal convolution and LSTM step in O(1) time
+        without sliding-window recomputation.
+
         Args:
             audio_chunk: Raw audio tensor of shape (batch, 1, 320).
-            state: Current CodecState containing audio history.
+            state: Current CodecState containing FIFO conv and LSTM buffers.
 
         Returns:
             Tuple of (z_chunk, next_state) with z_chunk shape (batch, 128, 1).
@@ -231,26 +235,10 @@ class EnCodec24kCandidate(StreamingCodec):
         assert audio_chunk.dim() == 3 and audio_chunk.shape[-1] == 320, (
             f"Expected chunk shape (batch, 1, 320), got {audio_chunk.shape}"
         )
-        device = audio_chunk.device
-        if (
-            "audio_history" not in state.encoder_conv_states
-            or state.encoder_conv_states["audio_history"].shape[0]
-            != audio_chunk.shape[0]
-        ):
-            state.encoder_conv_states["audio_history"] = torch.zeros(
-                audio_chunk.shape[0], 1, self.buffer_samples, device=device
-            )
-
-        history = state.encoder_conv_states["audio_history"]
-        window = torch.cat([history[:, :, 320:], audio_chunk], dim=-1)
 
         with torch.no_grad():
-            z_window = self.model.encoder(window)
-            z_chunk = z_window[:, :, -1:]
-
-        next_state = state.clone()
-        next_state.encoder_conv_states["audio_history"] = window
-        next_state.frame_index += 1
+            z_chunk, next_state = self.stream_encoder.step(audio_chunk, state)
+            next_state.frame_index += 1
 
         return z_chunk, next_state
 
@@ -262,9 +250,12 @@ class EnCodec24kCandidate(StreamingCodec):
     ) -> tuple[torch.Tensor, CodecState]:
         """Decode 128-d continuous latent frame back into 320 audio samples.
 
+        Executes true stateful causal overlap-add synthesis and recurrent LSTM
+        in O(1) time preserving phase and temporal continuity.
+
         Args:
             latent_chunk: Continuous latent of shape (batch, 128, 1).
-            state: Current CodecState.
+            state: Current CodecState containing overlap-add buffers.
             bypass_quantizer: Whether to bypass the RVQ quantizer.
 
         Returns:
@@ -275,16 +266,17 @@ class EnCodec24kCandidate(StreamingCodec):
         )
 
         with torch.no_grad():
-            if bypass_quantizer:
-                audio_chunk = self.model.decoder(latent_chunk)
-            else:
+            if not bypass_quantizer:
                 codes = self.model.quantizer.encode(
                     latent_chunk, self.model.frame_rate, self.model.bandwidth
                 )
                 emb = self.model.quantizer.decode(codes)
-                audio_chunk = self.model.decoder(emb)
+                dec_in = emb
+            else:
+                dec_in = latent_chunk
 
-        next_state = state.clone()
+            audio_chunk, next_state = self.stream_decoder.step(dec_in, state)
+
         return audio_chunk, next_state
 
     def forward_full(

@@ -90,6 +90,15 @@ class AdapterState:
         self.gru_state = None
         self.frame_index = 0
 
+    def apply_decay(self, decay_factor: float) -> None:
+        """Apply lazy exponential soft decay to recurrent GRU hidden state.
+
+        Args:
+            decay_factor: Multiplicative scalar alpha in [0.0, 1.0].
+        """
+        if self.gru_state is not None:
+            self.gru_state = self.gru_state * decay_factor
+
 
 class PersonalizedAdapter(nn.Module):
     """Sub-250K parameter Personalized Adapter generating target vocal timbre.
@@ -259,6 +268,14 @@ class PipelineStreamingState:
         self.cleanser_state.reset()
         self.prosody_state.reset()
         self.adapter_state.reset()
+
+    def apply_decay(self, decay_factor: float) -> None:
+        """Apply lazy decay to adapter recurrent state upon speech resumption.
+
+        Args:
+            decay_factor: Multiplicative scalar alpha in [0.0, 1.0].
+        """
+        self.adapter_state.apply_decay(decay_factor)
 
 
 class FullPersonalizedPipeline(nn.Module):

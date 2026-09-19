@@ -135,7 +135,8 @@ def test_hangover_bridges_intra_phrase_micropause() -> None:
     for _ in range(6):
         decision = controller.process_frame(silence)
         assert decision.state == SessionState.HANGOVER
-        assert decision.action == SessionAction.PROCESS_NORMAL
+        assert decision.action == SessionAction.IDLE_SKIP  # 0% GPU workload
+        assert len(decision.chunks_to_process) == 0
         assert decision.decay_factor == 1.0  # Timbre state fully intact!
 
     # 3. Second phrase callout ("Two of them!")

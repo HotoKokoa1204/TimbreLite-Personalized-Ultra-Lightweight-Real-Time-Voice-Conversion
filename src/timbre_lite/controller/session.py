@@ -181,13 +181,13 @@ class SessionController:
         # Case 2: Silence detected by VAD
         else:
             if self.state == SessionState.ACTIVE:
-                # Transition: ACTIVE -> HANGOVER
+                # Transition: ACTIVE -> HANGOVER (gates GPU during micro-pause)
                 self.state = SessionState.HANGOVER
                 self._hangover_count = self.hangover_frames - 1
                 self.lookback_buffer.push(chunk)
                 return SessionDecision(
-                    action=SessionAction.PROCESS_NORMAL,
-                    chunks_to_process=[chunk],
+                    action=SessionAction.IDLE_SKIP,
+                    chunks_to_process=[],
                     decay_factor=1.0,
                     state=self.state,
                     vad_confidence=confidence,
@@ -203,8 +203,8 @@ class SessionController:
                     self._hangover_count -= 1
                     self.lookback_buffer.push(chunk)
                     return SessionDecision(
-                        action=SessionAction.PROCESS_NORMAL,
-                        chunks_to_process=[chunk],
+                        action=SessionAction.IDLE_SKIP,
+                        chunks_to_process=[],
                         decay_factor=1.0,
                         state=self.state,
                         vad_confidence=confidence,

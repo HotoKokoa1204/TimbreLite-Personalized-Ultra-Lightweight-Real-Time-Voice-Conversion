@@ -197,3 +197,24 @@ def test_full_pipeline_end_to_end_streaming(
     assert state.cleanser_state.frame_index == 0
     assert state.prosody_state.frame_index == 0
     assert state.adapter_state.frame_index == 0
+
+
+def test_lazy_decay_scaling_recurrent_state() -> None:
+    """Test 7: Verify apply_decay scales GRU recurrent state exponentially."""
+    adapter = PersonalizedAdapter(in_dim=64, out_dim=128)
+    state = adapter.init_state(batch_size=1)
+    dummy_u = torch.randn(1, 64, 1)
+
+    # Warm up GRU state with 2 chunks
+    _, state = adapter.forward_chunk(dummy_u, state)
+    _, state = adapter.forward_chunk(dummy_u, state)
+    assert state.gru_state is not None
+    h_before = state.gru_state.clone()
+
+    # Apply decay alpha = 0.5
+    state.apply_decay(0.5)
+    assert torch.allclose(state.gru_state, h_before * 0.5)
+
+    # Apply decay alpha = 0.0 (complete reset after prolonged silence)
+    state.apply_decay(0.0)
+    assert torch.allclose(state.gru_state, torch.zeros_like(h_before))

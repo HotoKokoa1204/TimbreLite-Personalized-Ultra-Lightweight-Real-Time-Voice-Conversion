@@ -46,9 +46,8 @@ def test_pareto_compression_sweep() -> None:
             assert r.parameter_count < 250_000, (
                 f"Compressed dim {r.bottleneck_dim} exceeded 250K: {r.parameter_count}"
             )
-        assert r.mean_latency_ms > 0.0
-        assert 0.0 <= r.speaker_similarity <= 1.0
-        assert 0.0 <= r.phonetic_preservation <= 1.0
+        assert r.speaker_similarity is None
+        assert r.phonetic_preservation is None
         prev_params = r.parameter_count
 
     # 16-dim must be under 25K

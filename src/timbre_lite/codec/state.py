@@ -16,6 +16,7 @@ class CodecState:
         encoder_lstm_states: Hidden and cell states (h, c) for encoder recurrent.
         decoder_conv_states: Receptive field buffers for decoder causal conv.
         decoder_lstm_states: Hidden and cell states (h, c) for decoder recurrent.
+        decoder_overlap_states: Layer-specific overlap-add buffers for transposed conv.
         overlap_buffer: Tail overlap buffer for transposed convolution synthesis.
         frame_index: Sequential index of currently processed streaming frame.
     """
@@ -28,6 +29,7 @@ class CodecState:
     decoder_lstm_states: dict[str, tuple[torch.Tensor, torch.Tensor]] = field(
         default_factory=dict
     )
+    decoder_overlap_states: dict[str, torch.Tensor] = field(default_factory=dict)
     overlap_buffer: torch.Tensor | None = None
     frame_index: int = 0
 
@@ -37,6 +39,7 @@ class CodecState:
         self.encoder_lstm_states.clear()
         self.decoder_conv_states.clear()
         self.decoder_lstm_states.clear()
+        self.decoder_overlap_states.clear()
         self.overlap_buffer = None
         self.frame_index = 0
 
@@ -60,6 +63,9 @@ class CodecState:
             decoder_lstm_states={
                 k: (v[0].clone(), v[1].clone())
                 for k, v in self.decoder_lstm_states.items()
+            },
+            decoder_overlap_states={
+                k: v.clone() for k, v in self.decoder_overlap_states.items()
             },
             overlap_buffer=(
                 self.overlap_buffer.clone() if self.overlap_buffer is not None else None

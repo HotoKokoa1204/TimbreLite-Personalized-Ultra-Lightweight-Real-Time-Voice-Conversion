@@ -44,11 +44,13 @@ class ContentionMetrics:
 
 
 class GamingContentionBenchmark:
-    """Three-tier gaming contention benchmark suite.
+    """Synthetic gaming contention simulation benchmark suite.
 
-    Quantifies competitive gaming contention to prove hypothesis H3:
+    Simulates concurrent compute workload contention to evaluate hypothesis H3:
     personal voice conversion introduces negligible (<1%) frametime overhead
-    and imperceptible tail latency interference under high-refresh workloads.
+    and imperceptible tail latency interference under concurrent render loops.
+    Note: Real graphics queue validation under DirectX/Vulkan is conducted
+    during target hardware deployment.
     """
 
     def __init__(

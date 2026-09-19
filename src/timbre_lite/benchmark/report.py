@@ -55,18 +55,18 @@ class ScientificReportGenerator:
             (p for p in self.pareto_points if p.bottleneck_dim == 64),
             self.pareto_points[0],
         )
-        h1_confirmed = p64.parameter_count < 250_000 and p64.speaker_similarity > 0.85
+        h1_confirmed = p64.parameter_count < 250_000
         results.append(
             HypothesisResult(
                 hypothesis_id="H1",
                 statement=(
-                    "Personalized adapter achieves target persona with "
-                    "Sub-250K parameters."
+                    "Personalized adapter architecture satisfies "
+                    "Sub-250K parameter budget."
                 ),
                 confirmed=h1_confirmed,
                 evidence=(
-                    f"Parameters: {p64.parameter_count:,} (< 250K), "
-                    f"Cosine Sim: {p64.speaker_similarity:.3f}"
+                    f"Parameters: {p64.parameter_count:,} (< 250K); "
+                    "Persona cosine sim pending trained checkpoint"
                 ),
             )
         )
@@ -97,14 +97,15 @@ class ScientificReportGenerator:
                 hypothesis_id="H3",
                 statement=(
                     "Voice conversion causes negligible (<1.0%) contention "
-                    "under gaming refresh rates."
+                    "in synthetic gaming benchmark."
                 ),
                 confirmed=h3_confirmed,
                 evidence=(
                     f"Delta P99: "
                     f"{self.contention_metrics.delta_p99_ms:.3f}ms (< 0.5ms), "
                     f"1% Low Drop: "
-                    f"{self.contention_metrics.one_percent_low_drop_pct:.2f}% (< 1.0%)"
+                    f"{self.contention_metrics.one_percent_low_drop_pct:.2f}% "
+                    "(< 1.0%); Hardware DirectX/Vulkan game trace pending"
                 ),
             )
         )
@@ -178,10 +179,20 @@ class ScientificReportGenerator:
         )
 
         for p in self.pareto_points:
+            sim_str = (
+                f"{p.speaker_similarity:.3f}"
+                if p.speaker_similarity is not None
+                else "N/A (pending ckpt)"
+            )
+            phon_str = (
+                f"{p.phonetic_preservation:.3f}"
+                if p.phonetic_preservation is not None
+                else "N/A (pending ckpt)"
+            )
             lines.append(
                 f"| {p.bottleneck_dim} | {p.parameter_count:,} | "
                 f"{p.mean_latency_ms:.3f} | {p.p95_latency_ms:.3f} | "
-                f"{p.speaker_similarity:.3f} | {p.phonetic_preservation:.3f} |"
+                f"{sim_str} | {phon_str} |"
             )
 
         m = self.contention_metrics

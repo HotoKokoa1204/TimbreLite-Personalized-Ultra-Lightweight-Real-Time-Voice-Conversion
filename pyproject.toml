@@ -16,6 +16,7 @@ dependencies = [
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
     "scipy>=1.10.0",
+    "encodec>=0.1.1",
 ]
 
 [project.optional-dependencies]
