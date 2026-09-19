@@ -9,7 +9,7 @@ The fixed human operator speaking into the microphone.
 _Avoid_: Arbitrary speaker, input speaker, any speaker
 
 **Target Persona**:
-The fixed, unchanging target voice timbre and vocal identity.
+The fixed, unchanging target voice timbre and vocal identity, specifically instantiated as Genshin Impact's Hu Tao (胡桃, Chinese voice edition by Tao Dian).
 _Avoid_: Arbitrary target, zero-shot target, reference speaker
 
 **Content Cleanser**:
