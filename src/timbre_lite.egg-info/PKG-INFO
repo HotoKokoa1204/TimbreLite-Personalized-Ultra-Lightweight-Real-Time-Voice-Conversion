@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: timbre_lite
+Version: 0.1.0
+Summary: Personalized Ultra-Lightweight Real-Time Voice Conversion
+Author-email: AGILAB NTNU <mjhsu@ntnu.edu.tw>
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: torch>=2.0.0
+Requires-Dist: torchaudio>=2.0.0
+Requires-Dist: scipy>=1.10.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: pre-commit>=3.0.0; extra == "dev"
