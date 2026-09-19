@@ -40,6 +40,10 @@ _Avoid_: Lookahead buffer, future window
 A brief post-speech duration during which GPU inference is gated but temporal timbre state is frozen to preserve continuity across micro-pauses.
 _Avoid_: Hold time, silence delay
 
+**Continuous Latent Space**:
+The 128-dimensional continuous embedding per 13.33ms frame produced by the causal neural codec encoder and consumed by the decoder, distinct from discrete multi-codebook indices.
+_Avoid_: Discrete tokens, codebook indices, 1024-d latent
+
 **Soft Decay**:
-An exponential transition that gradually brings the temporal timbre state back to neutral after prolonged silence.
-_Avoid_: Hard reset, zeroing out
+An exponential transition (calculated lazily on host CPU upon speech resumption) that smoothly converges the Temporal Timbre State back to neutral after prolonged silence without GPU workload during idle.
+_Avoid_: Hard reset, zeroing out, polling decay

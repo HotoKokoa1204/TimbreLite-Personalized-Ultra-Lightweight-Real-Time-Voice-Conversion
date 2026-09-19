@@ -23,7 +23,6 @@ def speech_synthetic_24k() -> torch.Tensor:
     sr = 24000
     total_samples = 24000
     t = torch.linspace(0, 1.0, total_samples).unsqueeze(0).unsqueeze(0)
-    # Voiced harmonic signal with pitch contour around 160Hz
     f0 = 160.0 + 35.0 * torch.sin(2 * math.pi * 3.0 * t)
     phase = 2 * math.pi * torch.cumsum(f0 / sr, dim=-1)
     harmonics = (
@@ -32,7 +31,6 @@ def speech_synthetic_24k() -> torch.Tensor:
         + 0.15 * torch.sin(3 * phase)
         + 0.05 * torch.sin(4 * phase)
     )
-    # Formant envelope
     envelope = torch.exp(-0.5 * ((t - 0.5) / 0.25) ** 2)
     return harmonics * (0.2 + 0.8 * envelope)
 
@@ -41,7 +39,6 @@ def test_candidate_audit_and_weights(
     encodec_candidate: EnCodec24kCandidate,
 ) -> None:
     """Test 1: Verify architectural contracts and weights availability."""
-    # Candidate A: StreamCodec2 (arXiv:2509.13670)
     streamcodec2 = StreamCodec2Candidate()
     contract_a = streamcodec2.contract
     assert contract_a.name == "StreamCodec2"
@@ -54,7 +51,6 @@ def test_candidate_audit_and_weights(
     with pytest.raises(NotImplementedError):
         streamcodec2.encode_chunk(torch.randn(1, 1, 320), streamcodec2.init_state())
 
-    # Candidate B: Meta EnCodec 24kHz Causal
     contract_b = encodec_candidate.contract
     assert contract_b.name == "EnCodec_24kHz_Causal"
     assert contract_b.sample_rate == 24000
@@ -86,14 +82,9 @@ def test_continuous_latent_passthrough_gate(
         max_relative_sc_deg=0.05,
     )
 
-    # Assertions for the Go/No-Go Gate
     assert eval_results["gate_passed"] is True, f"Gate failed: {eval_results}"
-    # Continuous bypass should achieve high fidelity (SI-SDR > 15 dB)
     assert eval_results["si_sdr_continuous_db"] > 15.0
-    # Continuous LSD should be comparable to or better than quantized baseline
-    assert (
-        eval_results["delta_log_spectral_distance_db"] <= 0.5
-    )  # continuous LSD <= quant LSD + 0.5dB
+    assert eval_results["delta_log_spectral_distance_db"] <= 0.5
 
 
 def test_identity_adapter_passthrough(
@@ -101,10 +92,9 @@ def test_identity_adapter_passthrough(
     speech_synthetic_24k: torch.Tensor,
 ) -> None:
     """Test 3: Identity adapter A(z) = z matches continuous bypass."""
-    x = speech_synthetic_24k[:, :, :4800]  # 200ms
+    x = speech_synthetic_24k[:, :, :4800]
     with torch.no_grad():
         z = encodec_candidate.model.encoder(x)
-        # Identity adapter mapping
         z_adapted = z.clone()
         y_adapted = encodec_candidate.model.decoder(z_adapted)[:, :, : x.shape[-1]]
         y_direct = encodec_candidate.model.decoder(z)[:, :, : x.shape[-1]]
@@ -116,13 +106,12 @@ def test_identity_adapter_passthrough(
 def test_strict_causality_zero_lookahead(
     encodec_candidate: EnCodec24kCandidate,
 ) -> None:
-    """Test 4: Strict causality test verifying altering future chunks has 0 impact."""
+    """Test 4: Strict causality verifying altering future has 0 past impact."""
     torch.manual_seed(123)
     c0 = torch.randn(1, 1, 320)
     c1 = torch.randn(1, 1, 320)
-    c2_modified = torch.randn(1, 1, 320) * 10.0
+    c2_future = torch.randn(1, 1, 320) * 10.0
 
-    # Stream Run 1: feed c0, c1
     state1 = encodec_candidate.init_state()
     z0_run1, state1 = encodec_candidate.encode_chunk(c0, state1)
     y0_run1, _ = encodec_candidate.decode_chunk(z0_run1, state1)
@@ -130,7 +119,6 @@ def test_strict_causality_zero_lookahead(
     z1_run1, state1 = encodec_candidate.encode_chunk(c1, state1)
     y1_run1, _ = encodec_candidate.decode_chunk(z1_run1, state1)
 
-    # Stream Run 2: feed c0, c1, then future altered c2_modified
     state2 = encodec_candidate.init_state()
     z0_run2, state2 = encodec_candidate.encode_chunk(c0, state2)
     y0_run2, _ = encodec_candidate.decode_chunk(z0_run2, state2)
@@ -138,23 +126,133 @@ def test_strict_causality_zero_lookahead(
     z1_run2, state2 = encodec_candidate.encode_chunk(c1, state2)
     y1_run2, _ = encodec_candidate.decode_chunk(z1_run2, state2)
 
-    # Feed modified future
-    _, _ = encodec_candidate.encode_chunk(c2_modified, state2)
+    _, _ = encodec_candidate.encode_chunk(c2_future, state2)
 
-    # Mathematical causality assertion:
-    diff_z1 = (z1_run1 - z1_run2).abs().max().item()
-    diff_y1 = (y1_run1 - y1_run2).abs().max().item()
+    max_abs_diff_z = (z1_run1 - z1_run2).abs().max().item()
+    mean_abs_diff_z = (z1_run1 - z1_run2).abs().mean().item()
+    max_abs_diff_y = (y1_run1 - y1_run2).abs().max().item()
+    mean_abs_diff_y = (y1_run1 - y1_run2).abs().mean().item()
 
-    assert diff_z1 == 0.0, f"Future altered past latent! Diff: {diff_z1}"
-    assert diff_y1 == 0.0, f"Future altered past audio! Diff: {diff_y1}"
+    assert max_abs_diff_z == 0.0
+    assert mean_abs_diff_z == 0.0
+    assert max_abs_diff_y == 0.0
+    assert mean_abs_diff_y == 0.0
+
+
+def test_adversarial_future_perturbation_causality(
+    encodec_candidate: EnCodec24kCandidate,
+) -> None:
+    """Test 5: Adversarial causality with DC +1.0 and high-frequency spikes."""
+    torch.manual_seed(777)
+    c0 = torch.randn(1, 1, 320)
+    c1 = torch.randn(1, 1, 320)
+
+    # Extreme adversarial future chunks
+    c2_dc = torch.ones(1, 1, 320)
+    c2_nyquist = torch.tensor([1.0, -1.0] * 160, dtype=torch.float32).view(1, 1, 320)
+
+    # Baseline stream: c0 -> c1
+    state_base = encodec_candidate.init_state()
+    z0_base, state_base = encodec_candidate.encode_chunk(c0, state_base)
+    y0_base, _ = encodec_candidate.decode_chunk(z0_base, state_base)
+    z1_base, state_base = encodec_candidate.encode_chunk(c1, state_base)
+    y1_base, _ = encodec_candidate.decode_chunk(z1_base, state_base)
+
+    for future_adv in [c2_dc, c2_nyquist]:
+        state_adv = encodec_candidate.init_state()
+        z0_adv, state_adv = encodec_candidate.encode_chunk(c0, state_adv)
+        y0_adv, _ = encodec_candidate.decode_chunk(z0_adv, state_adv)
+        z1_adv, state_adv = encodec_candidate.encode_chunk(c1, state_adv)
+        y1_adv, _ = encodec_candidate.decode_chunk(z1_adv, state_adv)
+
+        # Feed adversarial future
+        _, _ = encodec_candidate.encode_chunk(future_adv, state_adv)
+
+        max_diff = (y1_base - y1_adv).abs().max().item()
+        mean_diff = (y1_base - y1_adv).abs().mean().item()
+        assert max_diff == 0.0
+        assert mean_diff == 0.0
+
+
+def test_latent_manifold_perturbation_robustness(
+    encodec_candidate: EnCodec24kCandidate,
+    speech_synthetic_24k: torch.Tensor,
+) -> None:
+    """Test 6: Latent manifold robustness under continuous Gaussian perturbations."""
+    x = speech_synthetic_24k[:, :, :12000]
+    with torch.no_grad():
+        z = encodec_candidate.model.encoder(x)
+        y_ref = encodec_candidate.model.decoder(z)[:, :, : x.shape[-1]]
+
+    torch.manual_seed(42)
+    eps = torch.randn_like(z)
+
+    prev_diff = 0.0
+    for alpha in [0.01, 0.03, 0.05, 0.1]:
+        z_pert = z + alpha * eps
+        with torch.no_grad():
+            y_pert = encodec_candidate.model.decoder(z_pert)[:, :, : x.shape[-1]]
+
+        assert not torch.isnan(y_pert).any()
+        assert not torch.isinf(y_pert).any()
+
+        peak = y_pert.abs().max().item()
+        assert peak < 1.5, f"Waveform explosion detected: peak = {peak}"
+
+        diff = (y_pert - y_ref).abs().mean().item()
+        # Ensure smooth monotonic sensitivity without discontinuity
+        assert diff > prev_diff
+        prev_diff = diff
+
+
+def test_latent_interpolation_smoothness(
+    encodec_candidate: EnCodec24kCandidate,
+) -> None:
+    """Test 7: Smooth continuous interpolation across distinct latent trajectories."""
+    sr = 24000
+    t = torch.linspace(0, 0.5, sr // 2).unsqueeze(0).unsqueeze(0)
+    xa = 0.5 * torch.sin(2 * math.pi * 130 * t)
+    xb = 0.5 * torch.sin(2 * math.pi * 260 * t)
+
+    with torch.no_grad():
+        za = encodec_candidate.model.encoder(xa)
+        zb = encodec_candidate.model.encoder(xb)
+
+        for alpha in [0.0, 0.25, 0.5, 0.75, 1.0]:
+            z_interp = (1.0 - alpha) * za + alpha * zb
+            y_interp = encodec_candidate.model.decoder(z_interp)[:, :, : xa.shape[-1]]
+
+            assert not torch.isnan(y_interp).any()
+            assert not torch.isinf(y_interp).any()
+            peak = y_interp.abs().max().item()
+            assert peak < 1.5, f"Catastrophic artifact at alpha {alpha}: {peak}"
+
+
+def test_bandwidth_sweep_reconstruction(
+    encodec_candidate: EnCodec24kCandidate,
+    speech_synthetic_24k: torch.Tensor,
+) -> None:
+    """Test 8: Evaluate reconstruction across EnCodec bandwidth profiles."""
+    x = speech_synthetic_24k[:, :, :12000]
+
+    for bw in [6.0, 12.0, 24.0]:
+        encodec_candidate.model.set_target_bandwidth(bw)
+        with torch.no_grad():
+            frames = encodec_candidate.model.encode(x)
+            y_bw = encodec_candidate.model.decode(frames)[:, :, : x.shape[-1]]
+
+        assert y_bw.shape == x.shape
+        assert not torch.isnan(y_bw).any()
+        peak = y_bw.abs().max().item()
+        assert peak < 1.5
 
 
 def test_chunk_streaming_state_continuity(
     encodec_candidate: EnCodec24kCandidate,
     speech_synthetic_24k: torch.Tensor,
 ) -> None:
-    """Test 5: Continuous streaming across sequential chunks without NaN/Inf."""
-    x = speech_synthetic_24k[:, :, :3200]  # 10 chunks (133.3ms)
+    """Test 9: Continuous streaming across sequential chunks without NaN/Inf."""
+    x = speech_synthetic_24k[:, :, :3200]
     chunks = torch.split(x, 320, dim=-1)
 
     state = encodec_candidate.init_state()
@@ -166,33 +264,30 @@ def test_chunk_streaming_state_continuity(
             z_chunk, state, bypass_quantizer=True
         )
 
-        assert not torch.isnan(y_chunk).any(), "NaN detected in streamed audio chunk"
-        assert not torch.isinf(y_chunk).any(), "Inf detected in streamed audio chunk"
-        assert y_chunk.shape == chunk.shape, f"Unexpected shape: {y_chunk.shape}"
+        assert not torch.isnan(y_chunk).any()
+        assert not torch.isinf(y_chunk).any()
+        assert y_chunk.shape == chunk.shape
         output_chunks.append(y_chunk)
 
     y_stream = torch.cat(output_chunks, dim=-1)
     assert y_stream.shape == x.shape
-    # Ensure energy is preserved reasonably
     energy_in = torch.mean(x**2).item()
     energy_out = torch.mean(y_stream**2).item()
-    assert energy_out > 0.01 * energy_in, "Streamed audio has collapsed to silence"
+    assert energy_out > 0.01 * energy_in
 
 
 def test_memory_footprint_stability(
     encodec_candidate: EnCodec24kCandidate,
 ) -> None:
-    """Test 6: Verify streaming memory footprint is static across 500 chunks."""
+    """Test 10: Verify streaming memory footprint is static across 500 chunks."""
     torch.manual_seed(999)
     state = encodec_candidate.init_state()
     dummy_chunk = torch.randn(1, 1, 320)
 
-    # Warmup
     for _ in range(10):
         z, state = encodec_candidate.encode_chunk(dummy_chunk, state)
         _, state = encodec_candidate.decode_chunk(z, state)
 
-    # Run 500 iterations and track tensor memory
     initial_allocated = (
         torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
     )
@@ -203,4 +298,4 @@ def test_memory_footprint_stability(
         assert y.shape == (1, 1, 320)
 
     final_allocated = torch.cuda.memory_allocated() if torch.cuda.is_available() else 0
-    assert final_allocated == initial_allocated, "CUDA memory leak detected"
+    assert final_allocated == initial_allocated
