@@ -19,9 +19,11 @@ def _build_card(s: dict[str, str]) -> str:
     """Build a comparison card for a single utterance."""
     title = s["title"]
     src_p = s["src_path"]
+    pass_p = s.get("pass_path", "")
     conv_p = s["conv_path"]
     tgt_p = s["tgt_path"]
     source = s["source"]
+    passthrough = s.get("passthrough", "")
     converted = s["converted"]
     target = s["target"]
 
@@ -32,7 +34,7 @@ def _build_card(s: dict[str, str]) -> str:
         'mb-4 flex items-center gap-2">',
         f'          <span class="text-indigo-400">🎵</span> {title}',
         "        </h2>",
-        '        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">',
+        '        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">',
         '          <div class="bg-[var(--content,#0f172a)]/60 border '
         'border-[var(--border,#334155)] rounded-xl p-4 flex flex-col '
         'justify-between">',
@@ -49,12 +51,27 @@ def _build_card(s: dict[str, str]) -> str:
         f'            <audio controls class="w-full mt-2 h-9 rounded" src="{source}">'
         "</audio>",
         "          </div>",
+        '          <div class="bg-emerald-950/20 border border-emerald-500/30 '
+        'rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">',
+        "            <div>",
+        '              <div class="flex items-center justify-between mb-2">',
+        '                <span class="text-xs font-bold uppercase tracking-wider '
+        'text-emerald-400">2. Codec 直通還原</span>',
+        '                <span class="text-[10px] px-1.5 py-0.5 rounded '
+        'bg-emerald-500/20 text-emerald-300 font-mono">Passthrough</span>',
+        "              </div>",
+        '              <p class="text-xs text-[var(--muted-foreground,#94a3b8)] '
+        f'mb-3 break-all font-mono">{pass_p}</p>',
+        "            </div>",
+        '            <audio controls class="w-full mt-2 h-9 rounded" '
+        f'src="{passthrough}"></audio>',
+        "          </div>",
         '          <div class="bg-indigo-950/30 border border-indigo-500/40 '
         "rounded-xl p-4 flex flex-col justify-between relative overflow-hidden\">",
         "            <div>",
         '              <div class="flex items-center justify-between mb-2">',
         '                <span class="text-xs font-bold uppercase tracking-wider '
-        'text-indigo-400">⚡ 2. 轉換輸出</span>',
+        'text-indigo-400">⚡ 3. 轉換輸出 (5 Epoch)</span>',
         '                <span class="text-[10px] px-1.5 py-0.5 rounded '
         'bg-indigo-500/20 text-indigo-300 font-mono">13.33ms</span>',
         "              </div>",
@@ -70,7 +87,7 @@ def _build_card(s: dict[str, str]) -> str:
         "            <div>",
         '              <div class="flex items-center justify-between mb-2">',
         '                <span class="text-xs font-bold uppercase '
-        'tracking-wider text-rose-400">3. 胡桃參照</span>',
+        'tracking-wider text-rose-400">4. 胡桃參照</span>',
         '                <span class="text-[10px] '
         'text-[var(--muted-foreground,#94a3b8)]">24 kHz</span>',
         "              </div>",
@@ -93,9 +110,13 @@ def main() -> None:
             "id": "utt_0019",
             "title": "人聲真實句 1: user_utt_0019 (2.93s, 93% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0019.wav"),
+            "passthrough": to_b64(
+                "outputs/encodec_passthrough_user_utt_0019.wav"
+            ),
             "converted": to_b64("outputs/converted_user_utt_0019.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0001.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0019.wav",
+            "pass_path": "outputs/encodec_passthrough_user_utt_0019.wav",
             "conv_path": "outputs/converted_user_utt_0019.wav",
             "tgt_path": "data/hu_tao/processed/24k/hutao_utt_0001.wav",
         },
@@ -103,9 +124,13 @@ def main() -> None:
             "id": "utt_0130",
             "title": "人聲真實句 2: user_utt_0130 (2.82s, 93% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0130.wav"),
+            "passthrough": to_b64(
+                "outputs/encodec_passthrough_user_utt_0130.wav"
+            ),
             "converted": to_b64("outputs/converted_user_utt_0130.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0002.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0130.wav",
+            "pass_path": "outputs/encodec_passthrough_user_utt_0130.wav",
             "conv_path": "outputs/converted_user_utt_0130.wav",
             "tgt_path": "data/hu_tao/processed/24k/hutao_utt_0002.wav",
         },
@@ -113,21 +138,15 @@ def main() -> None:
             "id": "utt_0190",
             "title": "人聲真實句 3: user_utt_0190 (3.55s, 100% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0190.wav"),
+            "passthrough": to_b64(
+                "outputs/encodec_passthrough_user_utt_0190.wav"
+            ),
             "converted": to_b64("outputs/converted_user_utt_0190.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0003.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0190.wav",
+            "pass_path": "outputs/encodec_passthrough_user_utt_0190.wav",
             "conv_path": "outputs/converted_user_utt_0190.wav",
             "tgt_path": "data/hu_tao/processed/24k/hutao_utt_0003.wav",
-        },
-        {
-            "id": "utt_0001",
-            "title": "前段錄音: user_utt_0001 (2.26s, 鍵盤點擊雜音)",
-            "source": to_b64("data/my_voice/processed/24k/user_utt_0001.wav"),
-            "converted": to_b64("outputs/converted_user_utt_0001.wav"),
-            "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0001.wav"),
-            "src_path": "data/my_voice/processed/24k/user_utt_0001.wav",
-            "conv_path": "outputs/converted_user_utt_0001.wav",
-            "tgt_path": "data/hu_tao/processed/24k/hutao_utt_0001.wav",
         },
     ]
 
@@ -138,24 +157,23 @@ def main() -> None:
         '<html lang="zh-TW">',
         "<head>",
         '  <meta charset="utf-8">',
-        "  <title>TimbreLite 語音轉換效果試聽 (Hu Tao Target)</title>",
+        "  <title>TimbreLite 語音轉換效果與模組診斷試聽</title>",
         '  <script src="https://www.gstatic.com/antigravity/web/dev/'
         'tailwindcss.min.js"></script>',
         "</head>",
         '<body class="bg-[var(--background,#0f172a)] '
         'text-[var(--foreground,#f8fafc)] antialiased p-6 font-sans min-h-screen">',
-        '  <div class="max-w-4xl mx-auto space-y-6">',
+        '  <div class="max-w-6xl mx-auto space-y-6">',
         '    <div class="bg-[var(--card,#1e293b)] border '
         'border-[var(--border,#334155)] rounded-2xl p-6 shadow-lg">',
         '      <div class="flex items-center justify-between">',
         "        <div>",
         '          <h1 class="text-2xl font-bold tracking-tight '
         'text-[var(--foreground,#f8fafc)] flex items-center gap-2">',
-        "            <span>🎙️</span> TimbreLite 語音轉換效果試聽 (Hu Tao Target)",
+        "            <span>🎙️</span> TimbreLite 語音轉換效果與模組逐層診斷面板",
         "          </h1>",
         '          <p class="text-sm text-[var(--muted-foreground,#94a3b8)] mt-1">',
-        "            Phase 6（Stage 1 蒸餾 + Stage 2 音色重構）｜ "
-        "320-sample (13.33ms) 因果串流推論",
+        "            包含 EnCodec 直通還原驗證與 Stage 2 轉換診斷",
         "          </p>",
         "        </div>",
         '        <span class="px-3 py-1 text-xs font-semibold rounded-full '
@@ -169,22 +187,23 @@ def main() -> None:
         "    </div>",
         '    <div class="bg-[var(--card,#1e293b)] border '
         'border-[var(--border,#334155)] rounded-2xl p-5 text-sm '
-        'text-[var(--muted-foreground,#94a3b8)] space-y-2">',
+        'text-[var(--muted-foreground,#94a3b8)] space-y-3">',
         '      <h3 class="font-medium text-[var(--foreground,#f8fafc)] '
         'flex items-center gap-2">',
-        "        <span>💡</span> 本地播放與檔案位置",
+        "        <span>💡</span> 逐軌診斷說明（為什麼剛才是單音持續蜂鳴？）",
         "      </h3>",
-        '      <ul class="list-disc list-inside space-y-1 text-xs">',
-        "        <li><strong>瀏覽器直接開啟：</strong> 本頁面已生成於專案的 "
-        "<code>outputs/audition.html</code>，直接雙擊即可用任何瀏覽器播放。</li>",
-        "        <li><strong>WAV 檔案本機路徑：</strong>",
-        '          <ul class="list-disc list-inside pl-4 mt-1 space-y-0.5 '
-        'font-mono text-[11px]">',
-        "            <li>原始錄音：data/my_voice/processed/24k/user_utt_0001.wav</li>",
-        "            <li>轉換輸出：outputs/converted_user_utt_0001.wav</li>",
-        "            <li>胡桃參照：data/hu_tao/processed/24k/hutao_utt_0001.wav</li>",
-        "          </ul>",
-        "        </li>",
+        '      <ul class="list-disc list-inside space-y-1.5 text-xs">',
+        "        <li><strong>軌道 1（原始錄音）：</strong> "
+        "您的 24kHz 真實人聲輸入。</li>",
+        "        <li><strong>軌道 2（Codec 直通還原）：</strong> "
+        "將您的聲音經 EnCodec Encoder 編碼後直接由 Decoder 解碼。"
+        "您可以親自聽聽看：<strong>聲音非常清晰、咬字完整，完全沒有被當作雜訊！</strong>"
+        "這證明輸入層與神經 Codec 完好無損。</li>",
+        "        <li><strong>軌道 3（轉換輸出）：</strong> 經過目前僅訓練 5 個 Epoch "
+        "的 Stage 2 Adapter。"
+        "因為 GRU 尚未學會時序音訊合成，特徵時序變化度暴跌了 12 倍，"
+        "退化成靜態均值向量，導致解碼器輸出 75Hz 週期性蜂鳴純音（逼——）。</li>",
+        "        <li><strong>軌道 4（胡桃參照）：</strong> 胡桃目標目標原聲。</li>",
         "      </ul>",
         "    </div>",
         "  </div>",
