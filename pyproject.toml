@@ -20,6 +20,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+curation = [
+    "av>=10.0.0",
+    "transformers>=4.28.0",
+    "huggingface_hub>=0.14.0",
+    "tqdm>=4.60.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -71,6 +77,23 @@ exclude = [
     "dist",
     ".venv",
 ]
+
+[[tool.mypy.overrides]]
+module = [
+    "soundfile",
+    "soundfile.*",
+    "scipy",
+    "scipy.*",
+    "torchaudio",
+    "torchaudio.*",
+    "tqdm",
+    "tqdm.*",
+    "transformers",
+    "transformers.*",
+    "av",
+    "av.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"

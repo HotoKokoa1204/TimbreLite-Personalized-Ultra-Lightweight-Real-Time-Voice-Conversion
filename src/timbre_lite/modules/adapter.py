@@ -345,6 +345,24 @@ class FullPersonalizedPipeline(nn.Module):
             adapter_state=self.adapter.init_state(batch_size=batch_size, device=dev),
         )
 
+    def forward_sequence(
+        self, z_seq: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Process full temporal sequence of continuous codec latents.
+
+        Args:
+            z_seq: Input continuous latent tensor of shape (batch, 128, time).
+
+        Returns:
+            Tuple of (z_adapted, c_seq, p_seq) where z_adapted has shape
+            (batch, 128, time).
+        """
+        c_seq = self.cleanser.forward_sequence(z_seq)
+        p_seq = self.prosody_head.forward_sequence(z_seq)
+        u_seq = self.fusion(c_seq, p_seq)
+        z_adapted = self.adapter.forward_sequence(u_seq)
+        return z_adapted, c_seq, p_seq
+
     def step_audio_chunk(
         self,
         audio_chunk: torch.Tensor,
