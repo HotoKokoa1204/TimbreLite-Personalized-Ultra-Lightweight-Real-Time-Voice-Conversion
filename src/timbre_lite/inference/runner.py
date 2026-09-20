@@ -117,6 +117,17 @@ class VoiceConverter:
         if y_recon.ndim == 0:
             y_recon = y_recon.unsqueeze(0)
         res: torch.Tensor = y_recon[:orig_len].detach().cpu()
+
+        # Match output energy to input energy
+        in_rms = torch.sqrt(torch.mean(t_audio**2))
+        out_rms = torch.sqrt(torch.mean(res**2))
+        if in_rms > 1e-4 and out_rms > 1e-5:
+            gain = in_rms / (out_rms + 1e-8)
+            res = res * gain
+            peak = torch.max(torch.abs(res))
+            if peak > 0.99:
+                res = res * (0.99 / peak)
+
         return res
 
     def convert_stream(
@@ -183,6 +194,16 @@ class VoiceConverter:
                 converted = torch.zeros(0, dtype=torch.float32)
         else:
             converted = self.convert_utterance(audio_24k)
+
+        # Match output energy with input audio
+        in_rms = torch.sqrt(torch.mean(audio_24k**2))
+        out_rms = torch.sqrt(torch.mean(converted**2))
+        if in_rms > 1e-4 and out_rms > 1e-5:
+            gain = in_rms / (out_rms + 1e-8)
+            converted = converted * gain
+            peak = torch.max(torch.abs(converted))
+            if peak > 0.99:
+                converted = converted * (0.99 / peak)
 
         save_wav(out_p, converted, sample_rate=24000)
         return out_p
