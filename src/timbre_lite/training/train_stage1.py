@@ -133,10 +133,12 @@ def train_stage1(
             step_loss = metrics.get("loss_distill_total", 0.0)
             total_loss += step_loss
             num_batches += 1
+            cos_loss = metrics.get("loss_distill_cos", 1.0)
+            cos_sim = max(0.0, 1.0 - cos_loss)
             pbar.set_postfix(
                 {
                     "loss": f"{step_loss:.4f}",
-                    "cos": f"{metrics.get('loss_distill_cosine', 0.0):.4f}",
+                    "sim": f"{cos_sim:.4f}",
                 }
             )
 
@@ -144,8 +146,10 @@ def train_stage1(
 
         # Validation loop
         avg_val_loss = avg_train_loss
+        avg_val_sim = 0.0
         if val_loader is not None:
             val_loss_sum = 0.0
+            val_cos_sum = 0.0
             val_count = 0
             cleanser.eval()
             proj_head.eval()
@@ -164,11 +168,13 @@ def train_stage1(
                     z = codec.model.encoder(audio)
                     c = cleanser.forward_sequence(z)
                     p = proj_head(c)
-                    loss, _ = trainer.loss_fn(p, t_feat, mask=mask)
+                    loss, val_m = trainer.loss_fn(p, t_feat, mask=mask)
                     val_loss_sum += float(loss)
+                    val_cos_sum += float(val_m.get("loss_distill_cos", 1.0))
                     val_count += 1
             if val_count > 0:
                 avg_val_loss = val_loss_sum / val_count
+                avg_val_sim = max(0.0, 1.0 - (val_cos_sum / val_count))
 
         scheduler.step()
 
@@ -176,6 +182,7 @@ def train_stage1(
             "epoch": float(epoch),
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
+            "val_sim": avg_val_sim,
             "lr": float(scheduler.get_last_lr()[0]),
         }
         history.append(epoch_stats)
@@ -183,6 +190,7 @@ def train_stage1(
         epoch_pbar.set_postfix(
             train=f"{avg_train_loss:.4f}",
             val=f"{avg_val_loss:.4f}",
+            sim=f"{avg_val_sim:.4f}",
             best=f"{best_loss:.4f}",
         )
 
