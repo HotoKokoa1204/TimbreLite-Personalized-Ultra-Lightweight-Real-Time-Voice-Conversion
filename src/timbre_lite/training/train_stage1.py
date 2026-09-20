@@ -9,7 +9,7 @@ from typing import Any
 
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from timbre_lite.codec.candidate import EnCodec24kCandidate
 from timbre_lite.distillation.loss import DistillationProjectionHead
@@ -25,7 +25,7 @@ from timbre_lite.training.trainer import DistillationTrainer
 def train_stage1(
     train_manifest: str | Path,
     val_manifest: str | Path | None = None,
-    epochs: int = 10,
+    epochs: int = 100,
     batch_size: int = 16,
     lr: float = 3e-4,
     crop_sec: float = 2.56,
@@ -37,7 +37,7 @@ def train_stage1(
     Args:
         train_manifest: Path to train manifest with cached features.
         val_manifest: Optional path to val manifest.
-        epochs: Number of training epochs.
+        epochs: Number of training epochs (default: 100).
         batch_size: DataLoader mini-batch size.
         lr: Learning rate for AdamW optimizer.
         crop_sec: Training crop duration in seconds.
@@ -56,7 +56,7 @@ def train_stage1(
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
 
-    print(f"Initializing Stage 1 training on device: {dev}")
+    print(f"Initializing Stage 1 training ({epochs} epochs) on device: {dev}")
     codec = EnCodec24kCandidate()
     cleanser = ContentCleanser(in_dim=128, content_dim=64)
     proj_head = DistillationProjectionHead(in_dim=64, out_dim=768)
@@ -67,6 +67,9 @@ def train_stage1(
         codec=codec,
         lr=lr,
         device=dev,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        trainer.optimizer, T_max=epochs, eta_min=1e-5
     )
 
     train_ds = VoiceConversionDataset(
@@ -101,11 +104,23 @@ def train_stage1(
     best_ckpt_path = ckpt_dir / "stage1_cleanser_best.pt"
     history: list[dict[str, float]] = []
 
-    for epoch in range(1, epochs + 1):
+    epoch_pbar = tqdm(
+        range(1, epochs + 1),
+        desc="Stage 1 Progress (100 Epochs)",
+        unit="epoch",
+        dynamic_ncols=True,
+    )
+
+    for epoch in epoch_pbar:
         total_loss = 0.0
         num_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}")
+        pbar = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch:03d}/{epochs:03d}",
+            leave=False,
+            dynamic_ncols=True,
+        )
         for batch in pbar:
             if "teacher_features" not in batch:
                 continue
@@ -118,7 +133,12 @@ def train_stage1(
             step_loss = metrics.get("loss_distill_total", 0.0)
             total_loss += step_loss
             num_batches += 1
-            pbar.set_postfix({"loss": f"{step_loss:.4f}"})
+            pbar.set_postfix(
+                {
+                    "loss": f"{step_loss:.4f}",
+                    "cos": f"{metrics.get('loss_distill_cosine', 0.0):.4f}",
+                }
+            )
 
         avg_train_loss = total_loss / max(num_batches, 1)
 
@@ -150,15 +170,20 @@ def train_stage1(
             if val_count > 0:
                 avg_val_loss = val_loss_sum / val_count
 
+        scheduler.step()
+
         epoch_stats = {
             "epoch": float(epoch),
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
+            "lr": float(scheduler.get_last_lr()[0]),
         }
         history.append(epoch_stats)
-        print(
-            f"Epoch {epoch:02d} | Train Loss: {avg_train_loss:.4f} | "
-            f"Val Loss: {avg_val_loss:.4f}"
+
+        epoch_pbar.set_postfix(
+            train=f"{avg_train_loss:.4f}",
+            val=f"{avg_val_loss:.4f}",
+            best=f"{best_loss:.4f}",
         )
 
         checkpoint_data = {
@@ -182,7 +207,6 @@ def train_stage1(
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
             torch.save(checkpoint_data, best_ckpt_path)
-            print(f"  --> Saved new best checkpoint to {best_ckpt_path}")
 
     # Write training history log
     with open(ckpt_dir / "stage1_history.json", "w", encoding="utf-8") as f:
@@ -210,7 +234,7 @@ def main() -> None:
         default="data/features/my_voice/val_manifest_with_features.json",
         help="Path to validation manifest.",
     )
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--crop-sec", type=float, default=2.56)
