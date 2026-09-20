@@ -71,13 +71,13 @@ class CUDAGraphRunner:
             device: Execution torch device.
             mode: Graph execution strategy.
         """
-        self.module = module
-        self.input_shape = input_shape
         self.device = (
             device
             if device is not None
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
+        self.module = module.to(self.device)
+        self.input_shape = input_shape
         self.mode = mode
         self.metrics = ExecutionMetrics()
 

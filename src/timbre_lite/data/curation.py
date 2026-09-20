@@ -135,7 +135,7 @@ class AudioSegmenter:
                     frame[outliers] *= 0.1
                     clean[idx_start:idx_end] = frame
 
-        return cast(np.ndarray, clean)
+        return clean
 
     def normalize_loudness(self, audio: np.ndarray) -> np.ndarray:
         """Normalize audio RMS loudness to target dBFS with peak limiting.
