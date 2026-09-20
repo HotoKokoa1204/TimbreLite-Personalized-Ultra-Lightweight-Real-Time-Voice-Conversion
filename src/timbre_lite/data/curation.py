@@ -45,6 +45,9 @@ class CurationConfig:
     transient_gate_threshold: float = 6.0
     train_ratio: float = 0.9
     seed: int = 42
+    filter_speech: bool = True
+    speech_filter_mode: str = "hybrid"
+    max_crest_factor: float = 12.0
 
 
 @dataclass
@@ -343,9 +346,29 @@ def curate_source_speaker_audio(
     # 3. VAD segmentation bounded strictly between 2.0s and 8.0s
     segments = segmenter.detect_speech_segments(gated_audio, cfg.native_sr)
 
+    # 4. Filter non-speech, keyboard clicks, and noise if enabled
+    valid_segments: list[tuple[int, int]] = []
+    if cfg.filter_speech and segments:
+        from timbre_lite.data.speech_filter import SpeechVerifier
+
+        verifier = SpeechVerifier(
+            mode=cfg.speech_filter_mode,
+            max_crest_factor=cfg.max_crest_factor,
+        )
+        candidate_chunks = [gated_audio[s:e] for s, e in segments]
+        verifications = verifier.verify_batch(candidate_chunks, cfg.native_sr)
+        valid_segments = [seg for seg, v in zip(segments, verifications) if v.is_speech]
+        rejected_count = len(segments) - len(valid_segments)
+        print(
+            f"Speech verification: {len(valid_segments)}/{len(segments)} "
+            f"utterances verified ({rejected_count} rejected as clicks/noise)."
+        )
+    else:
+        valid_segments = segments
+
     samples: list[DualRateSample] = []
     for idx, (start, end) in enumerate(
-        tqdm(segments, desc="Curating utterances"), start=1
+        tqdm(valid_segments, desc="Curating utterances"), start=1
     ):
         chunk = gated_audio[start:end]
         sample = segmenter.process_utterance(chunk, idx, prefix="user_utt")

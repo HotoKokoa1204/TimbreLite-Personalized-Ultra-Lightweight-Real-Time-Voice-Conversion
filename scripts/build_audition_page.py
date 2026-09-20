@@ -36,7 +36,7 @@ def _build_card(s: dict[str, str]) -> str:
         "        </h2>",
         '        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">',
         '          <div class="bg-[var(--content,#0f172a)]/60 border '
-        'border-[var(--border,#334155)] rounded-xl p-4 flex flex-col '
+        "border-[var(--border,#334155)] rounded-xl p-4 flex flex-col "
         'justify-between">',
         "            <div>",
         '              <div class="flex items-center justify-between mb-2">',
@@ -67,7 +67,7 @@ def _build_card(s: dict[str, str]) -> str:
         f'src="{passthrough}"></audio>',
         "          </div>",
         '          <div class="bg-indigo-950/30 border border-indigo-500/40 '
-        "rounded-xl p-4 flex flex-col justify-between relative overflow-hidden\">",
+        'rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">',
         "            <div>",
         '              <div class="flex items-center justify-between mb-2">',
         '                <span class="text-xs font-bold uppercase tracking-wider '
@@ -82,7 +82,7 @@ def _build_card(s: dict[str, str]) -> str:
         f'src="{converted}"></audio>',
         "          </div>",
         '          <div class="bg-[var(--content,#0f172a)]/60 border '
-        'border-[var(--border,#334155)] rounded-xl p-4 flex flex-col '
+        "border-[var(--border,#334155)] rounded-xl p-4 flex flex-col "
         'justify-between">',
         "            <div>",
         '              <div class="flex items-center justify-between mb-2">',
@@ -110,9 +110,7 @@ def main() -> None:
             "id": "utt_0019",
             "title": "人聲真實句 1: user_utt_0019 (2.93s, 93% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0019.wav"),
-            "passthrough": to_b64(
-                "outputs/encodec_passthrough_user_utt_0019.wav"
-            ),
+            "passthrough": to_b64("outputs/encodec_passthrough_user_utt_0019.wav"),
             "converted": to_b64("outputs/converted_user_utt_0019.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0001.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0019.wav",
@@ -124,9 +122,7 @@ def main() -> None:
             "id": "utt_0130",
             "title": "人聲真實句 2: user_utt_0130 (2.82s, 93% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0130.wav"),
-            "passthrough": to_b64(
-                "outputs/encodec_passthrough_user_utt_0130.wav"
-            ),
+            "passthrough": to_b64("outputs/encodec_passthrough_user_utt_0130.wav"),
             "converted": to_b64("outputs/converted_user_utt_0130.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0002.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0130.wav",
@@ -138,9 +134,7 @@ def main() -> None:
             "id": "utt_0190",
             "title": "人聲真實句 3: user_utt_0190 (3.55s, 100% 語音活躍)",
             "source": to_b64("data/my_voice/processed/24k/user_utt_0190.wav"),
-            "passthrough": to_b64(
-                "outputs/encodec_passthrough_user_utt_0190.wav"
-            ),
+            "passthrough": to_b64("outputs/encodec_passthrough_user_utt_0190.wav"),
             "converted": to_b64("outputs/converted_user_utt_0190.wav"),
             "target": to_b64("data/hu_tao/processed/24k/hutao_utt_0003.wav"),
             "src_path": "data/my_voice/processed/24k/user_utt_0190.wav",
@@ -186,7 +180,7 @@ def main() -> None:
         all_cards,
         "    </div>",
         '    <div class="bg-[var(--card,#1e293b)] border '
-        'border-[var(--border,#334155)] rounded-2xl p-5 text-sm '
+        "border-[var(--border,#334155)] rounded-2xl p-5 text-sm "
         'text-[var(--muted-foreground,#94a3b8)] space-y-3">',
         '      <h3 class="font-medium text-[var(--foreground,#f8fafc)] '
         'flex items-center gap-2">',
