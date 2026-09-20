@@ -131,6 +131,7 @@ class PersonalizedAdapter(nn.Module):
         self.hidden_dim = hidden_dim
         self.gru_hidden = gru_hidden
 
+        self.skip_proj = nn.Conv1d(in_dim, out_dim, kernel_size=1)
         self.in_proj = nn.Conv1d(in_dim, hidden_dim, kernel_size=1)
 
         tcn_blocks: list[CausalDilatedResidualBlock] = []
@@ -191,6 +192,7 @@ class PersonalizedAdapter(nn.Module):
         Returns:
             Target persona latent tensor of shape (batch, out_dim, time).
         """
+        skip: torch.Tensor = self.skip_proj(u_seq)
         h: torch.Tensor = self.in_proj(u_seq)
         for block in self.tcn_blocks:
             h = block.forward_sequence(h)
@@ -200,7 +202,8 @@ class PersonalizedAdapter(nn.Module):
         gru_out, _ = self.gru(h_perm)
         h = gru_out.permute(0, 2, 1)
 
-        out: torch.Tensor = self.out_proj(h)
+        delta: torch.Tensor = self.out_proj(h)
+        out: torch.Tensor = skip + delta
         return out
 
     def forward_chunk(
@@ -219,6 +222,7 @@ class PersonalizedAdapter(nn.Module):
         if state is None:
             state = self.init_state(batch_size=u_chunk.shape[0], device=u_chunk.device)
 
+        skip_chunk: torch.Tensor = self.skip_proj(u_chunk)
         h: torch.Tensor = self.in_proj(u_chunk)
         next_tcn_states: list[tuple[torch.Tensor, torch.Tensor]] = []
         for i, block in enumerate(self.tcn_blocks):
@@ -237,7 +241,8 @@ class PersonalizedAdapter(nn.Module):
         gru_out, next_gru_h = self.gru(h_perm, prev_gru_h)
         h = gru_out.permute(0, 2, 1)
 
-        out_chunk: torch.Tensor = self.out_proj(h)
+        delta_chunk: torch.Tensor = self.out_proj(h)
+        out_chunk: torch.Tensor = skip_chunk + delta_chunk
         next_state = AdapterState(
             tcn_states=next_tcn_states,
             gru_state=next_gru_h,

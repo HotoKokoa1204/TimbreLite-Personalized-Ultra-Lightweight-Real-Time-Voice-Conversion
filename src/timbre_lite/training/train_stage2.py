@@ -9,7 +9,7 @@ from typing import Any
 
 import torch
 from torch.utils.data import DataLoader
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from timbre_lite.codec.candidate import EnCodec24kCandidate
 from timbre_lite.modules.adapter import (
@@ -31,7 +31,7 @@ def train_stage2(
     target_manifest: str | Path,
     val_manifest: str | Path | None = None,
     stage1_checkpoint: str | Path | None = None,
-    epochs: int = 10,
+    epochs: int = 100,
     batch_size: int = 8,
     lr: float = 2e-4,
     crop_sec: float = 2.56,
@@ -44,7 +44,7 @@ def train_stage2(
         target_manifest: Path to target speaker training manifest.
         val_manifest: Optional path to target speaker validation manifest.
         stage1_checkpoint: Optional path to pretrained Stage 1 Content Cleanser.
-        epochs: Number of training epochs.
+        epochs: Number of training epochs (default: 100).
         batch_size: Mini-batch size.
         lr: Learning rate for AdamW optimizer.
         crop_sec: Training crop window duration in seconds.
@@ -62,7 +62,7 @@ def train_stage2(
         if device is not None
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
-    print(f"Initializing Stage 2 training on device: {dev}")
+    print(f"Initializing Stage 2 training ({epochs} epochs) on device: {dev}")
 
     codec = EnCodec24kCandidate()
     cleanser = ContentCleanser(in_dim=128, content_dim=64)
@@ -98,6 +98,9 @@ def train_stage2(
     ).to(dev)
 
     trainer = AdapterTrainer(pipeline=pipeline, lr=lr, device=dev)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        trainer.optimizer, T_max=epochs, eta_min=1e-5
+    )
 
     train_ds = VoiceConversionDataset(
         manifest_path=target_manifest,
@@ -131,11 +134,23 @@ def train_stage2(
     best_ckpt_path = ckpt_dir / "stage2_adapter_best.pt"
     history: list[dict[str, float]] = []
 
-    for epoch in range(1, epochs + 1):
+    epoch_pbar = tqdm(
+        range(1, epochs + 1),
+        desc="Stage 2 Progress (100 Epochs)",
+        unit="epoch",
+        dynamic_ncols=True,
+    )
+
+    for epoch in epoch_pbar:
         total_loss = 0.0
         num_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Stage 2 Epoch {epoch}/{epochs}")
+        pbar = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch:03d}/{epochs:03d}",
+            leave=False,
+            dynamic_ncols=True,
+        )
         for batch in pbar:
             metrics = trainer.train_step(
                 target_audio_24k=batch["audio_24k"],
@@ -146,8 +161,9 @@ def train_stage2(
             num_batches += 1
             pbar.set_postfix(
                 {
-                    "total": f"{step_loss:.4f}",
-                    "stft": f"{metrics.get('loss_adapter_stft', 0.0):.4f}",
+                    "total": f"{step_loss:.3f}",
+                    "stft": f"{metrics.get('loss_adapter_stft', 0.0):.3f}",
+                    "lat": f"{metrics.get('loss_adapter_latent', 0.0):.3f}",
                 }
             )
 
@@ -179,15 +195,20 @@ def train_stage2(
             if val_count > 0:
                 avg_val_loss = val_loss_sum / val_count
 
+        scheduler.step()
+
         epoch_stats = {
             "epoch": float(epoch),
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
+            "lr": float(scheduler.get_last_lr()[0]),
         }
         history.append(epoch_stats)
-        print(
-            f"Stage 2 Epoch {epoch:02d} | Train Loss: {avg_train_loss:.4f} | "
-            f"Val Loss: {avg_val_loss:.4f}"
+
+        epoch_pbar.set_postfix(
+            train=f"{avg_train_loss:.3f}",
+            val=f"{avg_val_loss:.3f}",
+            best=f"{best_loss:.3f}",
         )
 
         checkpoint_data = {
@@ -214,7 +235,6 @@ def train_stage2(
         if avg_val_loss < best_loss:
             best_loss = avg_val_loss
             torch.save(checkpoint_data, best_ckpt_path)
-            print(f"  --> Saved new best Stage 2 checkpoint to {best_ckpt_path}")
 
     with open(ckpt_dir / "stage2_history.json", "w", encoding="utf-8") as f:
         json.dump(history, f, indent=2)
@@ -245,7 +265,7 @@ def main() -> None:
         default="checkpoints/stage1_cleanser_best.pt",
         help="Path to pretrained Stage 1 cleanser checkpoint.",
     )
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--crop-sec", type=float, default=2.56)
