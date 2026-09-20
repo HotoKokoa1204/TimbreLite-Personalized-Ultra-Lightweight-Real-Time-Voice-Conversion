@@ -7,8 +7,10 @@ __pycache__/
 *.egg
 build/
 dist/
-# Dataset
+# Dataset and artifacts
 /data/
+/checkpoints/
+/outputs/
 # Environments
 .env
 .venv

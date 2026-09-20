@@ -269,8 +269,10 @@ class StatefulSEANetDecoder:
         """
         sconvtr_any: tp.Any = sconvtr
         convtr: tp.Any = sconvtr_any.convtr.convtr
-        weight: torch.Tensor = convtr.weight
-        bias: torch.Tensor | None = convtr.bias
+        weight: torch.Tensor = convtr.weight.to(x.device)
+        bias: torch.Tensor | None = (
+            convtr.bias.to(x.device) if convtr.bias is not None else None
+        )
         stride: int = convtr.stride[0]
         kernel_size: int = convtr.kernel_size[0]
         overlap_len = kernel_size - stride

@@ -1,0 +1,18 @@
+{
+  "device": "NVIDIA GeForce RTX 4050 Laptop GPU (CUDA 12.1)",
+  "latency": {
+    "p50_ms": 10.975500001222827,
+    "p90_ms": 11.748229997465387,
+    "p95_ms": 12.014069994620513,
+    "p99_ms": 12.590742996544584,
+    "mean_ms": 11.069173999421764,
+    "rtf": 0.8301880499566323
+  },
+  "architecture": {
+    "sample_rate_hz": 24000,
+    "hop_samples": 320,
+    "frame_duration_ms": 13.33,
+    "trainable_parameters": 162992
+  },
+  "timestamp": "2026-09-20T06:11:34Z"
+}
