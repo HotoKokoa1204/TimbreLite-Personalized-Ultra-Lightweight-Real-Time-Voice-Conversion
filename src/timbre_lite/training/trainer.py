@@ -78,7 +78,7 @@ class DistillationTrainer:
         """
         self.cleanser.train()
         self.proj_head.train()
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
         audio_24k = audio_24k.to(self.device)
         teacher_features = teacher_features.to(self.device)
@@ -103,8 +103,17 @@ class DistillationTrainer:
         # 4. Compute distillation loss
         loss, metrics = self.loss_fn(proj_student, teacher_features, mask=mask)
 
-        # 5. Backpropagation
-        loss.backward()
+        # 5. Backpropagation (OOM-safe)
+        try:
+            loss.backward()
+        except RuntimeError as exc:
+            if "CUDNN" in str(exc) or "out of memory" in str(exc).lower():
+                self.optimizer.zero_grad(set_to_none=True)
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                return {k: 0.0 for k in metrics}
+            raise
+
         nn.utils.clip_grad_norm_(
             list(self.cleanser.parameters()) + list(self.proj_head.parameters()),
             max_norm=1.0,

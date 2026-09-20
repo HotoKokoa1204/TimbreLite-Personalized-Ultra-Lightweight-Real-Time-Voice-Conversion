@@ -30,6 +30,7 @@ def train_stage1(
     lr: float = 3e-4,
     crop_sec: float = 2.56,
     checkpoint_dir: str | Path = "checkpoints",
+    resume_from: str | Path | None = None,
     device: torch.device | str | None = None,
 ) -> Path:
     """Run Stage 1 distillation training loop and save best checkpoint.
@@ -42,6 +43,7 @@ def train_stage1(
         lr: Learning rate for AdamW optimizer.
         crop_sec: Training crop duration in seconds.
         checkpoint_dir: Directory to save checkpoint files.
+        resume_from: Optional path to checkpoint to resume training from.
         device: Target compute device.
 
     Returns:
@@ -55,6 +57,11 @@ def train_stage1(
         if device is not None
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
+
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.cuda.empty_cache()
 
     print(f"Initializing Stage 1 training ({epochs} epochs) on device: {dev}")
     codec = EnCodec24kCandidate()
@@ -103,10 +110,66 @@ def train_stage1(
     best_loss = float("inf")
     best_ckpt_path = ckpt_dir / "stage1_cleanser_best.pt"
     history: list[dict[str, float]] = []
+    start_epoch = 1
+
+    if resume_from is not None:
+        res_p = Path(resume_from)
+        if res_p.is_file():
+            print(f"Resuming Stage 1 training from checkpoint: {res_p}...")
+            resume_ckpt = torch.load(res_p, map_location=dev, weights_only=False)
+            if "cleanser_state_dict" in resume_ckpt:
+                cleanser.load_state_dict(resume_ckpt["cleanser_state_dict"])
+            if "proj_head_state_dict" in resume_ckpt:
+                proj_head.load_state_dict(resume_ckpt["proj_head_state_dict"])
+            if "optimizer_state_dict" in resume_ckpt:
+                trainer.optimizer.load_state_dict(resume_ckpt["optimizer_state_dict"])
+
+            saved_epoch = int(resume_ckpt.get("epoch", 0))
+            start_epoch = saved_epoch + 1
+
+            if "val_loss" in resume_ckpt and resume_ckpt["val_loss"] is not None:
+                best_loss = float(resume_ckpt["val_loss"])
+
+            if "scheduler_state_dict" in resume_ckpt:
+                scheduler.load_state_dict(resume_ckpt["scheduler_state_dict"])
+            else:
+                scheduler.last_epoch = saved_epoch
+                curr_lr = scheduler.get_last_lr()[0]
+                for param_group in trainer.optimizer.param_groups:
+                    param_group["lr"] = curr_lr
+
+            hist_file = ckpt_dir / "stage1_history.json"
+            if hist_file.exists():
+                try:
+                    loaded_hist = json.loads(hist_file.read_text(encoding="utf-8"))
+                    history = [
+                        h for h in loaded_hist if int(h.get("epoch", 0)) <= saved_epoch
+                    ]
+                except Exception:
+                    history = []
+
+            curr_lr = scheduler.get_last_lr()[0]
+            print(
+                f"Resumed at epoch {saved_epoch}. Continuing epochs {start_epoch} "
+                f"to {epochs} (best_val_loss={best_loss:.3f}, lr={curr_lr:.2e})."
+            )
+        else:
+            print(
+                f"Warning: Checkpoint file '{res_p}' not found. Starting from scratch."
+            )
+
+    if start_epoch > epochs:
+        print(
+            f"Training already reached epoch {start_epoch - 1} "
+            f"(target epochs: {epochs}). Nothing to run."
+        )
+        return best_ckpt_path
 
     epoch_pbar = tqdm(
-        range(1, epochs + 1),
-        desc="Stage 1 Progress (100 Epochs)",
+        range(start_epoch, epochs + 1),
+        initial=start_epoch - 1,
+        total=epochs,
+        desc=f"Stage 1 Progress ({epochs} Epochs)",
         unit="epoch",
         dynamic_ncols=True,
     )
@@ -178,6 +241,9 @@ def train_stage1(
 
         scheduler.step()
 
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
+
         epoch_stats = {
             "epoch": float(epoch),
             "train_loss": avg_train_loss,
@@ -199,6 +265,7 @@ def train_stage1(
             "cleanser_state_dict": cleanser.state_dict(),
             "proj_head_state_dict": proj_head.state_dict(),
             "optimizer_state_dict": trainer.optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
             "train_loss": avg_train_loss,
             "val_loss": avg_val_loss,
             "config": {
@@ -253,7 +320,36 @@ def main() -> None:
         default="cuda" if torch.cuda.is_available() else "cpu",
     )
 
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help="Automatically resume from latest checkpoint.",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Explicit path to checkpoint file to resume from.",
+    )
+
     args = parser.parse_args()
+
+    resume_target: str | None = args.resume_from
+    if args.resume and resume_target is None:
+        default_latest = Path(args.checkpoint_dir) / "stage1_cleanser_latest.pt"
+        if default_latest.is_file():
+            resume_target = str(default_latest)
+        else:
+            default_best = Path(args.checkpoint_dir) / "stage1_cleanser_best.pt"
+            if default_best.is_file():
+                resume_target = str(default_best)
+            else:
+                print(
+                    f"Note: --resume specified but no checkpoint found in "
+                    f"'{args.checkpoint_dir}'. Starting fresh."
+                )
+
     train_stage1(
         train_manifest=args.train_manifest,
         val_manifest=args.val_manifest,
@@ -262,6 +358,7 @@ def main() -> None:
         lr=args.lr,
         crop_sec=args.crop_sec,
         checkpoint_dir=args.checkpoint_dir,
+        resume_from=resume_target,
         device=args.device,
     )
 

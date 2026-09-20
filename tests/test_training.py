@@ -164,3 +164,51 @@ def test_adapter_trainer_step() -> None:
 
     assert "loss_adapter_total" in metrics
     assert metrics["loss_adapter_total"] > 0.0
+
+
+def test_stage2_resume_from_checkpoint() -> None:
+    """Verify Stage 2 training can resume state from a saved checkpoint."""
+    from timbre_lite.training.train_stage2 import train_stage2
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        wav_path = tmp_path / "target.wav"
+        manifest_path = tmp_path / "manifest.json"
+        ckpt_dir = tmp_path / "checkpoints"
+
+        # Create 3 seconds of dummy audio
+        save_wav(wav_path, torch.randn(24000 * 3) * 0.1, 24000)
+        manifest_data = [
+            {
+                "id": "target_01",
+                "audio_24k": str(wav_path),
+                "audio_16k": str(wav_path),
+                "duration_sec": 3.0,
+            }
+        ]
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+        # 1. Run for 1 epoch
+        best_1 = train_stage2(
+            target_manifest=manifest_path,
+            epochs=1,
+            batch_size=1,
+            checkpoint_dir=ckpt_dir,
+            device="cpu",
+        )
+        assert best_1.is_file()
+        ckpt_1 = torch.load(ckpt_dir / "stage2_adapter_latest.pt", weights_only=False)
+        assert ckpt_1["epoch"] == 1
+
+        # 2. Resume to epoch 2
+        best_2 = train_stage2(
+            target_manifest=manifest_path,
+            epochs=2,
+            batch_size=1,
+            checkpoint_dir=ckpt_dir,
+            resume_from=ckpt_dir / "stage2_adapter_latest.pt",
+            device="cpu",
+        )
+        assert best_2.is_file()
+        ckpt_2 = torch.load(ckpt_dir / "stage2_adapter_latest.pt", weights_only=False)
+        assert ckpt_2["epoch"] == 2
