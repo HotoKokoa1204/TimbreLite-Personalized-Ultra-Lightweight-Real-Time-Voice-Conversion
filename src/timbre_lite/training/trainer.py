@@ -178,10 +178,10 @@ class AdapterTrainer:
             mask: Optional frame valid mask.
 
         Returns:
-            Dictionary of step loss metrics.
+            Dictionary of step loss metrics. Returns zeros on OOM skip.
         """
         self.pipeline.train()
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad(set_to_none=True)
 
         audio = target_audio_24k.to(self.device)
         if audio.ndim == 2:
@@ -205,7 +205,22 @@ class AdapterTrainer:
         loss_lat = self.latent_loss(z_adapted, z_target, mask=mask)
         total_loss = loss_stft + (2.0 * loss_lat)
 
-        total_loss.backward()
+        # 5. OOM-safe backward: if cuDNN workspace allocation fails mid-backward,
+        #    free the fragmented cache and skip the batch cleanly instead of crashing.
+        try:
+            total_loss.backward()
+        except RuntimeError as exc:
+            if "CUDNN" in str(exc) or "out of memory" in str(exc).lower():
+                self.optimizer.zero_grad(set_to_none=True)
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+                return {
+                    "loss_adapter_total": 0.0,
+                    "loss_adapter_stft": 0.0,
+                    "loss_adapter_latent": 0.0,
+                }
+            raise
+
         trainable = (
             list(self.pipeline.adapter.parameters())
             + list(self.pipeline.prosody_head.parameters())

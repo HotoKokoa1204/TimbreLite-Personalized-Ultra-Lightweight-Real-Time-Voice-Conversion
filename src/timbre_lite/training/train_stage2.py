@@ -62,6 +62,17 @@ def train_stage2(
         if device is not None
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
+
+    # Stabilize cuDNN to prevent CUDNN_STATUS_INTERNAL_ERROR on long runs.
+    # benchmark=True causes cuDNN to profile & pick fastest kernels each batch,
+    # which grows a fragmented workspace pool over 80+ epochs and eventually
+    # fails to allocate during backward(). Setting both flags off forces a
+    # single deterministic workspace path with bounded memory usage.
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        torch.cuda.empty_cache()
+
     print(f"Initializing Stage 2 training ({epochs} epochs) on device: {dev}")
 
     codec = EnCodec24kCandidate()
@@ -196,6 +207,11 @@ def train_stage2(
                 avg_val_loss = val_loss_sum / val_count
 
         scheduler.step()
+
+        # Purge cuDNN workspace cache at epoch boundary to prevent fragmentation
+        # over long training runs (the root cause of CUDNN_STATUS_INTERNAL_ERROR).
+        if dev.type == "cuda":
+            torch.cuda.empty_cache()
 
         epoch_stats = {
             "epoch": float(epoch),
