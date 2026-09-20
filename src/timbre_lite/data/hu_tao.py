@@ -102,13 +102,19 @@ def curate_hu_tao_dataset(
     dir_24k.mkdir(parents=True, exist_ok=True)
     dir_16k.mkdir(parents=True, exist_ok=True)
 
+    # Clean existing generated wavs to prevent stale files from prior runs
+    for old_f in dir_24k.glob("*.wav"):
+        old_f.unlink()
+    for old_f in dir_16k.glob("*.wav"):
+        old_f.unlink()
+
     # 1. Unzip archive if raw directory is empty
     archive_path = Path(zip_path)
-    wav_files = list(raw_dir.glob("*.wav")) + list(raw_dir.glob("**/*.wav"))
+    wav_files = sorted(set(raw_dir.rglob("*.wav")))
     if not wav_files:
         with zipfile.ZipFile(archive_path, "r") as zf:
             zf.extractall(raw_dir)
-        wav_files = list(raw_dir.glob("*.wav")) + list(raw_dir.glob("**/*.wav"))
+        wav_files = sorted(set(raw_dir.rglob("*.wav")))
 
     target_rms = 10.0 ** (cfg.target_loudness_dbfs / 20.0)  # 0.1 at -20 dBFS
     samples: list[dict[str, object]] = []

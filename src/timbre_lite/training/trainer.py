@@ -115,7 +115,23 @@ class DistillationTrainer:
 
 
 class AdapterTrainer:
-    """Stage 2: Trains Personalized Adapter on Hu Tao target distribution."""
+    """Stage 2: Target-domain timbre manifold auto-reconstruction trainer.
+
+    Trains the Personalized Adapter, Prosody Head, and Fusion modules using
+    target speaker audio (e.g. Hu Tao) via auto-encoding reconstruction:
+        y_target -> frozen EnCodec Encoder -> z_target -> Cleanser (bottleneck)
+                 -> Adapter + Prosody + Fusion -> z_adapted
+                 -> frozen EnCodec Decoder -> y_recon
+
+    Because the frozen Content Cleanser strips source speaker identity and enforces
+    a phonetic/content bottleneck, training on target audio forces the downstream
+    adapter and fusion layers to reconstruct speech on the target timbre manifold
+    conditioned solely on phonetic and pitch representations.
+
+    Note:
+        This is an auto-encoding reconstruction objective on the target speaker's
+        distribution, NOT a cross-speaker source-to-target paired conversion training.
+    """
 
     def __init__(
         self,

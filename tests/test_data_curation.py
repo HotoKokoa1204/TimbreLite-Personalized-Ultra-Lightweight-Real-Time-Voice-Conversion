@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,7 @@ from timbre_lite.data.curation import (
     CurationConfig,
     curate_source_speaker_audio,
 )
+from timbre_lite.data.hu_tao import HuTaoDatasetConfig, curate_hu_tao_dataset
 from timbre_lite.data.loader import load_audio, save_wav
 
 
@@ -175,3 +177,47 @@ def test_curate_source_speaker_manifest_split() -> None:
             assert Path(str(r["audio_16k"])).is_file()
             assert 24000 * 2 <= int(str(r["num_samples_24k"])) <= 24000 * 8
             assert 16000 * 2 <= int(str(r["num_samples_16k"])) <= 16000 * 8
+
+
+def test_curate_hu_tao_dataset_no_duplication() -> None:
+    """Verify Hu Tao curation deduplicates files and ignores <0.5s fragments."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        zip_path = tmp_path / "Hu_Tao.zip"
+        out_dir = tmp_path / "processed"
+        raw_work = tmp_path / "staging"
+        raw_work.mkdir(parents=True, exist_ok=True)
+        sub_work = raw_work / "nested"
+        sub_work.mkdir(parents=True, exist_ok=True)
+
+        sr = 44100
+        # Create 3 valid wavs (2 in root, 1 nested) and 1 short fragment (<0.5s)
+        t_valid = torch.linspace(0, 1.0, sr) * 0.1
+        t_short = torch.linspace(0, 0.2, int(sr * 0.2)) * 0.1
+
+        save_wav(raw_work / "utt_1.wav", t_valid, sr)
+        save_wav(raw_work / "utt_2.wav", t_valid, sr)
+        save_wav(sub_work / "utt_3.wav", t_valid, sr)
+        save_wav(raw_work / "short.wav", t_short, sr)
+
+        # Create zip archive
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            for f in raw_work.rglob("*.wav"):
+                zf.write(f, arcname=f.relative_to(raw_work))
+
+        config = HuTaoDatasetConfig(train_ratio=0.66, seed=42)
+        train_rec, val_rec = curate_hu_tao_dataset(
+            zip_path=zip_path,
+            output_dir=out_dir,
+            config=config,
+        )
+
+        # Exactly 3 valid utterances should be curated (short excluded, no duplicates)
+        total = len(train_rec) + len(val_rec)
+        assert total == 3, f"Expected 3 curated files, but got {total}"
+        assert len(train_rec) >= 1
+        assert len(val_rec) >= 1
+
+        # Verify output manifests exist
+        assert (out_dir / "train_manifest.json").is_file()
+        assert (out_dir / "val_manifest.json").is_file()
