@@ -1,0 +1,20 @@
+{
+  "user_utt_0019": {
+    "reference_oracle_median_hz": 76.0,
+    "expected_f0_min_hz": 70.0,
+    "expected_f0_max_hz": 82.0,
+    "disallowed_harmonic_hz": 152.0
+  },
+  "user_utt_0130": {
+    "reference_oracle_median_hz": 77.3,
+    "expected_f0_min_hz": 72.0,
+    "expected_f0_max_hz": 83.0,
+    "disallowed_harmonic_hz": 154.6
+  },
+  "user_utt_0190": {
+    "reference_oracle_median_hz": 78.2,
+    "expected_f0_min_hz": 73.0,
+    "expected_f0_max_hz": 90.0,
+    "disallowed_harmonic_hz": 156.4
+  }
+}

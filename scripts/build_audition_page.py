@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 
 
@@ -213,7 +212,9 @@ def main() -> None:
     print(f"Audition HTML successfully written to: {out_file.resolve()}")
 
     # Also update brain artifact audition page
-    brain_artifact = Path(r"C:\Users\KafuuChino\.gemini\antigravity\brain\d575f611-491e-4174-8333-d89717d9fe38\audition.html")
+    brain_artifact = Path(
+        r"C:\Users\KafuuChino\.gemini\antigravity\brain\d575f611-491e-4174-8333-d89717d9fe38\audition.html"
+    )
     brain_artifact.write_text("\n".join(doc_parts), encoding="utf-8")
     print(f"Brain artifact audition page updated: {brain_artifact.resolve()}")
 

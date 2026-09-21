@@ -37,7 +37,7 @@ class CurationConfig:
     native_sr: int = 48000
     codec_sr: int = 24000
     teacher_sr: int = 16000
-    hpf_cutoff_hz: float = 60.0
+    hpf_cutoff_hz: float = 65.0
     min_utterance_sec: float = 2.0
     max_utterance_sec: float = 8.0
     silence_split_sec: float = 0.4
@@ -46,8 +46,10 @@ class CurationConfig:
     train_ratio: float = 0.9
     seed: int = 42
     filter_speech: bool = True
-    speech_filter_mode: str = "hybrid"
-    max_crest_factor: float = 12.0
+    speech_filter_mode: str = "acoustic"
+    max_crest_factor: float = 11.5
+    min_rms: float = 0.008
+    min_voiced_ratio: float = 0.15
 
 
 @dataclass
@@ -313,16 +315,23 @@ def curate_source_speaker_audio(
     source_audio_path: str | Path,
     output_dir: str | Path,
     config: CurationConfig | None = None,
+    start_idx: int | None = None,
+    append: bool = False,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Execute complete curation pipeline on Source Speaker recording.
 
     Decodes audio, applies high-pass filter, click suppression, VAD segmentation,
-    loudness normalization, dual-rate export, and train/val manifest generation.
+    speech/click verification, loudness normalization, dual-rate export, and
+    train/val manifest generation.
 
     Args:
         source_audio_path: Path to raw recording file (e.g. data/my_voice/錄製.m4a).
         output_dir: Base output directory for processed files and manifests.
         config: Optional CurationConfig override.
+        start_idx: Optional starting utterance index. If None and append=True,
+            determines next index from existing manifests. Defaults to 1.
+        append: If True, appends new samples to existing manifests instead of
+            overwriting.
 
     Returns:
         Tuple of (train_manifest_records, val_manifest_records).
@@ -335,11 +344,33 @@ def curate_source_speaker_audio(
     dir_24k.mkdir(parents=True, exist_ok=True)
     dir_16k.mkdir(parents=True, exist_ok=True)
 
+    # Handle append mode and existing manifests
+    existing_train: list[dict[str, object]] = []
+    existing_val: list[dict[str, object]] = []
+    train_manifest_file = out_base / "train_manifest.json"
+    val_manifest_file = out_base / "val_manifest.json"
+
+    if append and train_manifest_file.is_file() and val_manifest_file.is_file():
+        existing_train = json.loads(train_manifest_file.read_text(encoding="utf-8"))
+        existing_val = json.loads(val_manifest_file.read_text(encoding="utf-8"))
+        if start_idx is None:
+            existing_ids = []
+            for item in existing_train + existing_val:
+                raw_id = str(item.get("id", ""))
+                if "_" in raw_id:
+                    suffix = raw_id.rsplit("_", 1)[-1]
+                    if suffix.isdigit():
+                        existing_ids.append(int(suffix))
+            start_idx = max(existing_ids, default=0) + 1
+
+    if start_idx is None:
+        start_idx = 1
+
     # 1. Load native audio (typically 48kHz mono float32)
     raw_audio, native_sr = load_audio(source_audio_path, target_sr=cfg.native_sr)
     audio_np = raw_audio.numpy()
 
-    # 2. High-pass filter (>60Hz) and transient click gate
+    # 2. High-pass filter (>65Hz) and transient click gate
     hpf_audio = segmenter.apply_highpass_filter(audio_np, cfg.native_sr)
     gated_audio = segmenter.apply_transient_gate(hpf_audio, cfg.native_sr)
 
@@ -354,6 +385,8 @@ def curate_source_speaker_audio(
         verifier = SpeechVerifier(
             mode=cfg.speech_filter_mode,
             max_crest_factor=cfg.max_crest_factor,
+            min_rms=getattr(cfg, "min_rms", 0.008),
+            min_voiced_ratio=getattr(cfg, "min_voiced_ratio", 0.15),
         )
         candidate_chunks = [gated_audio[s:e] for s, e in segments]
         verifications = verifier.verify_batch(candidate_chunks, cfg.native_sr)
@@ -367,18 +400,19 @@ def curate_source_speaker_audio(
         valid_segments = segments
 
     samples: list[DualRateSample] = []
-    for idx, (start, end) in enumerate(
-        tqdm(valid_segments, desc="Curating utterances"), start=1
+    for offset, (start, end) in enumerate(
+        tqdm(valid_segments, desc="Curating utterances")
     ):
+        curr_idx = start_idx + offset
         chunk = gated_audio[start:end]
-        sample = segmenter.process_utterance(chunk, idx, prefix="user_utt")
+        sample = segmenter.process_utterance(chunk, curr_idx, prefix="user_utt")
         samples.append(sample)
 
         # Save dual-rate WAV files
         save_wav(dir_24k / f"{sample.id}.wav", sample.audio_24k, cfg.codec_sr)
         save_wav(dir_16k / f"{sample.id}.wav", sample.audio_16k, cfg.teacher_sr)
 
-    # 4. Generate deterministic 90% train / 10% val manifest
+    # 5. Generate deterministic 90% train / 10% val manifest
     rng = np.random.default_rng(cfg.seed)
     indices = np.arange(len(samples))
     rng.shuffle(indices)
@@ -386,8 +420,8 @@ def curate_source_speaker_audio(
     split_point = int(len(samples) * cfg.train_ratio)
     train_idx = set(indices[:split_point])
 
-    train_records: list[dict[str, object]] = []
-    val_records: list[dict[str, object]] = []
+    new_train_records: list[dict[str, object]] = []
+    new_val_records: list[dict[str, object]] = []
 
     for i, s in enumerate(samples):
         record: dict[str, object] = {
@@ -399,17 +433,20 @@ def curate_source_speaker_audio(
             "num_samples_16k": len(s.audio_16k),
         }
         if i in train_idx:
-            train_records.append(record)
+            new_train_records.append(record)
         else:
-            val_records.append(record)
+            new_val_records.append(record)
 
-    with open(out_base / "train_manifest.json", "w", encoding="utf-8") as f:
-        json.dump(train_records, f, indent=2, ensure_ascii=False)
+    final_train = existing_train + new_train_records
+    final_val = existing_val + new_val_records
 
-    with open(out_base / "val_manifest.json", "w", encoding="utf-8") as f:
-        json.dump(val_records, f, indent=2, ensure_ascii=False)
+    with open(train_manifest_file, "w", encoding="utf-8") as f:
+        json.dump(final_train, f, indent=2, ensure_ascii=False)
 
-    return train_records, val_records
+    with open(val_manifest_file, "w", encoding="utf-8") as f:
+        json.dump(final_val, f, indent=2, ensure_ascii=False)
+
+    return final_train, final_val
 
 
 if __name__ == "__main__":

@@ -62,6 +62,7 @@ class SpeechVerifier:
         mode: str = "hybrid",
         max_crest_factor: float = 12.0,
         min_rms: float = 0.003,
+        min_voiced_ratio: float = 0.0,
         whisper_model_name: str = "openai/whisper-tiny",
         device: torch.device | str | None = None,
     ) -> None:
@@ -71,12 +72,14 @@ class SpeechVerifier:
             mode: Verification mode: 'acoustic', 'whisper', or 'hybrid'.
             max_crest_factor: Maximum allowed peak/RMS ratio (clicks usually > 15).
             min_rms: Minimum required RMS energy to avoid near-silence.
+            min_voiced_ratio: Min fraction of voiced frames required (0.0 to disable).
             whisper_model_name: HuggingFace model identifier for Whisper.
             device: Target compute device for neural verification.
         """
         self.mode = mode
         self.max_crest_factor = max_crest_factor
         self.min_rms = min_rms
+        self.min_voiced_ratio = min_voiced_ratio
         self.whisper_model_name = whisper_model_name
         self.device = (
             torch.device(device)
@@ -136,6 +139,32 @@ class SpeechVerifier:
                 crest,
                 rms,
             )
+
+        if self.min_voiced_ratio > 0.0:
+            from timbre_lite.modules.f0 import CausalF0Tracker, F0TrackerConfig
+
+            if (
+                not hasattr(self, "_f0_tracker")
+                or self._f0_tracker is None
+                or getattr(self._f0_tracker, "sr", None) != fs
+            ):
+                tracker_cfg = F0TrackerConfig(sample_rate=fs, f_min=65.0, f_max=380.0)
+                self._f0_tracker = CausalF0Tracker(tracker_cfg)
+
+            _, _, _, vuv = self._f0_tracker.process_utterance(audio)
+            voiced_ratio = float(vuv.mean())
+            if voiced_ratio < self.min_voiced_ratio:
+                reason = (
+                    f"low_voicing (voiced_ratio={voiced_ratio:.2f} "
+                    f"< {self.min_voiced_ratio:.2f})"
+                )
+                return (
+                    False,
+                    0.20,
+                    reason,
+                    crest,
+                    rms,
+                )
 
         # Voiced speech check: standard voice crest is typically 3.0 to 9.0
         confidence = float(

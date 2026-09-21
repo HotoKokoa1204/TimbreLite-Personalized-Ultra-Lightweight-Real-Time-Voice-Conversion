@@ -41,6 +41,7 @@ where = ["src"]
 target-version = "py310"
 lint.select = ["E", "F", "W", "I", "N"]
 lint.ignore = []
+lint.per-file-ignores = { "scripts/*.py" = ["E501"] }
 exclude = [
     ".git",
     ".mypy_cache",
@@ -93,6 +94,14 @@ module = [
     "av",
     "av.*",
 ]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "librosa",
+    "librosa.*",
+]
+follow_imports = "skip"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

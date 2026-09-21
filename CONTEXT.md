@@ -20,6 +20,14 @@ _Avoid_: Bottleneck encoder, feature extractor, speech tokenizer
 A lightweight causal projection directly predicting prosody and pitch representation from codec latents without an external pitch model during inference.
 _Avoid_: Pitch estimator, F0 extractor, RMVPE module
 
+**Explicit Pitch Conditioning**:
+An explicit, non-generative conditioning stream providing normalized fundamental frequency vectors ([normalized_logF0, delta_logF0, VUV]) to guide acoustic rendering via FiLM modulation without implicit neural guessing.
+_Avoid_: Implicit pitch prediction, black-box prosody guess
+
+**Target F0 Normalization**:
+A robust statistical mapping using median and interquartile range (med_t + IQR_t / IQR_s * (logF0_s - med_s)) that aligns source speaker intonation dynamics to the target persona's vocal register.
+_Avoid_: Global pitch shift, waveform pitch transposition, synthetic F0 prediction
+
 **Personalized Adapter**:
 A minimal causal TCN and GRU network dedicated exclusively to mapping speaker-invariant content and prosody into the target timbre manifold.
 _Avoid_: Voice converter, diffusion model, retrieval model

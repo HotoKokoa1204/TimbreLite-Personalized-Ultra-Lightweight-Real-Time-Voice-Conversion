@@ -103,14 +103,31 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=["hybrid", "acoustic", "whisper", "none"],
-        default="hybrid",
+        default="acoustic",
         help="Speech verification mode (hybrid=acoustic+whisper, acoustic=fast CPU).",
     )
     parser.add_argument(
         "--max-crest",
         type=float,
-        default=12.0,
+        default=11.5,
         help="Maximum crest factor threshold (mechanical clicks typically > 15).",
+    )
+    parser.add_argument(
+        "--min-rms",
+        type=float,
+        default=0.008,
+        help="Minimum RMS energy threshold to reject room noise and quiet pauses.",
+    )
+    parser.add_argument(
+        "--min-voiced-ratio",
+        type=float,
+        default=0.15,
+        help="Minimum fraction of voiced frames required to reject clicks.",
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append new samples to existing manifests instead of overwriting.",
     )
     parser.add_argument(
         "--clean-manifest",
@@ -135,9 +152,9 @@ def main() -> None:
 
     # Collect audio files
     if input_path.is_dir():
-        audio_files = [
-            p for p in input_path.iterdir() if p.suffix.lower() in AUDIO_EXTS
-        ]
+        audio_files = sorted(
+            [p for p in input_path.iterdir() if p.suffix.lower() in AUDIO_EXTS]
+        )
         if not audio_files:
             print(f"Error: No supported audio files found in {input_path}")
             sys.exit(1)
@@ -148,38 +165,46 @@ def main() -> None:
     filter_enabled = args.mode != "none"
     cfg = CurationConfig(
         filter_speech=filter_enabled,
-        speech_filter_mode=args.mode if filter_enabled else "hybrid",
+        speech_filter_mode=args.mode if filter_enabled else "acoustic",
         max_crest_factor=args.max_crest,
+        min_rms=args.min_rms,
+        min_voiced_ratio=args.min_voiced_ratio,
     )
 
-    print(f"\nCurating audio using mode: '{args.mode}' (max_crest={args.max_crest})...")
+    print(
+        f"\nCurating audio using mode: '{args.mode}' "
+        f"(max_crest={args.max_crest}, min_rms={args.min_rms}, "
+        f"min_voiced={args.min_voiced_ratio})..."
+    )
     output_dir = Path(args.output_dir)
 
-    all_train = []
-    all_val = []
+    train_records: list[dict[str, Any]] = []
+    val_records: list[dict[str, Any]] = []
 
-    for audio_file in audio_files:
-        print(f"\nProcessing: {audio_file.name}...")
+    for i, audio_file in enumerate(audio_files):
+        print(f"\n[{i + 1}/{len(audio_files)}] Processing: {audio_file.name}...")
+        should_append = args.append or (i > 0)
         train_records, val_records = curate_source_speaker_audio(
             source_audio_path=audio_file,
             output_dir=output_dir,
             config=cfg,
+            append=should_append,
         )
-        all_train.extend(train_records)
-        all_val.extend(val_records)
 
-    total_speech = len(all_train) + len(all_val)
-    total_dur = sum(r["duration_sec"] for r in all_train + all_val)
-
-    train_dur = sum(r["duration_sec"] for r in all_train)
-    val_dur = sum(r["duration_sec"] for r in all_val)
+    all_items = train_records + val_records
+    total_speech = len(all_items)
+    train_dur = sum(r["duration_sec"] for r in train_records)
+    val_dur = sum(r["duration_sec"] for r in val_records)
+    total_dur = train_dur + val_dur
 
     print("\n" + "=" * 65)
     print("AUDIO CURATION COMPLETED SUCCESSFULLY!")
     print(f" - Clean Speech Segments : {total_speech}")
     print(f" - Total Speech Duration : {total_dur / 60:.2f} min ({total_dur:.1f}s)")
-    print(f" - Training Split        : {len(all_train)} utts ({train_dur / 60:.2f}m)")
-    print(f" - Validation Split      : {len(all_val)} utts ({val_dur / 60:.2f}m)")
+    print(
+        f" - Training Split        : {len(train_records)} utts ({train_dur / 60:.2f}m)"
+    )
+    print(f" - Validation Split      : {len(val_records)} utts ({val_dur / 60:.2f}m)")
     print(f" - Manifest Location     : {output_dir / 'train_manifest.json'}")
     print("=" * 65)
     print("\nNext step: Extract teacher features or train Stage 1 Cleanser directly:")
