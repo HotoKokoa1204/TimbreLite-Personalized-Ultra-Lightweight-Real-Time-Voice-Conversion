@@ -70,6 +70,62 @@ class DualStreamFusion(nn.Module):
             return film_fused
 
 
+class ExplicitF0Encoder(nn.Module):
+    """Sub-5K causal F0 projection module generating FiLM modulation parameters.
+
+    Maps 3D normalized F0 representation [norm_log_f0, delta_norm_log_f0, vuv] into
+    channel-wise scaling (gamma) and shifting (beta) for cleansed content.
+    """
+
+    def __init__(
+        self, in_dim: int = 3, hidden_dim: int = 32, out_dim: int = 64
+    ) -> None:
+        """Initialize ExplicitF0Encoder.
+
+        Args:
+            in_dim: Input F0 vector dimension (3: norm_log_f0, delta_norm_log_f0, vuv).
+            hidden_dim: Intermediate feature channels (32).
+            out_dim: Cleansed content channel dimension (64).
+        """
+        super().__init__()
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+
+        # 3 -> 32 (3*32 + 32 = 128 params)
+        self.net1 = nn.Conv1d(in_dim, hidden_dim, kernel_size=1)
+        self.act = nn.SiLU()
+        # 32 -> 128 (32*128 + 128 = 4224 params) -> 64 for gamma, 64 for beta
+        self.net2 = nn.Conv1d(hidden_dim, out_dim * 2, kernel_size=1)
+
+        # Zero-initialization: ensure gamma=0, beta=0 at step 0 so Model B
+        # matches Model A exactly without sudden representation shock.
+        nn.init.zeros_(self.net2.weight)
+        nn.init.zeros_(self.net2.bias)
+
+    def count_parameters(self) -> int:
+        """Calculate total number of trainable parameters in this module.
+
+        Returns:
+            Integer parameter count (exact 4,352).
+        """
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def forward(self, f0_feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass generating (gamma, beta) FiLM parameters.
+
+        Args:
+            f0_feat: 3D F0 feature tensor of shape (batch, 3, time).
+
+        Returns:
+            Tuple of (gamma, beta) each of shape (batch, out_dim, time).
+        """
+        h = self.act(self.net1(f0_feat))
+        out = self.net2(h)
+        gamma, beta = torch.split(out, self.out_dim, dim=1)
+        return gamma, beta
+
+
 @dataclass
 class AdapterState:
     """Persistent streaming state for PersonalizedAdapter.
@@ -115,6 +171,8 @@ class PersonalizedAdapter(nn.Module):
         hidden_dim: int = 64,
         tcn_layers: int = 4,
         gru_hidden: int = 64,
+        use_gated_skip: bool = False,
+        initial_skip_gate: float = -4.0,
     ) -> None:
         """Initialize PersonalizedAdapter.
 
@@ -124,14 +182,24 @@ class PersonalizedAdapter(nn.Module):
             hidden_dim: Intermediate feature channel dimension.
             tcn_layers: Number of dilated causal residual blocks.
             gru_hidden: Hidden dimension of causal GRU.
+            use_gated_skip: Whether to modulate skip projection with learnable gate.
+            initial_skip_gate: Initial logit value alpha for skip gate (default -4.0).
         """
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.hidden_dim = hidden_dim
         self.gru_hidden = gru_hidden
+        self.use_gated_skip = use_gated_skip
 
         self.skip_proj = nn.Conv1d(in_dim, out_dim, kernel_size=1)
+        if use_gated_skip:
+            self.skip_gate: nn.Parameter | None = nn.Parameter(
+                torch.tensor([initial_skip_gate], dtype=torch.float32)
+            )
+        else:
+            self.register_parameter("skip_gate", None)
+
         self.in_proj = nn.Conv1d(in_dim, hidden_dim, kernel_size=1)
 
         tcn_blocks: list[CausalDilatedResidualBlock] = []
@@ -193,6 +261,9 @@ class PersonalizedAdapter(nn.Module):
             Target persona latent tensor of shape (batch, out_dim, time).
         """
         skip: torch.Tensor = self.skip_proj(u_seq)
+        if self.use_gated_skip and self.skip_gate is not None:
+            gate = torch.sigmoid(self.skip_gate)
+            skip = gate * skip
         h: torch.Tensor = self.in_proj(u_seq)
         for block in self.tcn_blocks:
             h = block.forward_sequence(h)
@@ -223,6 +294,9 @@ class PersonalizedAdapter(nn.Module):
             state = self.init_state(batch_size=u_chunk.shape[0], device=u_chunk.device)
 
         skip_chunk: torch.Tensor = self.skip_proj(u_chunk)
+        if self.use_gated_skip and self.skip_gate is not None:
+            gate = torch.sigmoid(self.skip_gate)
+            skip_chunk = gate * skip_chunk
         h: torch.Tensor = self.in_proj(u_chunk)
         next_tcn_states: list[tuple[torch.Tensor, torch.Tensor]] = []
         for i, block in enumerate(self.tcn_blocks):
@@ -297,6 +371,7 @@ class FullPersonalizedPipeline(nn.Module):
         prosody_head: InGraphProsodyHead,
         fusion: DualStreamFusion,
         adapter: PersonalizedAdapter,
+        f0_encoder: ExplicitF0Encoder | None = None,
     ) -> None:
         """Initialize FullPersonalizedPipeline.
 
@@ -306,6 +381,7 @@ class FullPersonalizedPipeline(nn.Module):
             prosody_head: In-graph prosody extraction head.
             fusion: Dual-stream conditioning fusion layer.
             adapter: Personalized adapter model.
+            f0_encoder: Optional ExplicitF0Encoder module for F0 FiLM modulation.
         """
         super().__init__()
         self.codec = codec
@@ -313,6 +389,7 @@ class FullPersonalizedPipeline(nn.Module):
         self.prosody_head = prosody_head
         self.fusion = fusion
         self.adapter = adapter
+        self.f0_encoder = f0_encoder
 
     def count_trainable_parameters(self) -> int:
         """Count trainable parameters across all personal conversion modules.
@@ -325,6 +402,7 @@ class FullPersonalizedPipeline(nn.Module):
             + self.prosody_head.count_parameters()
             + sum(p.numel() for p in self.fusion.parameters() if p.requires_grad)
             + self.adapter.count_parameters()
+            + (self.f0_encoder.count_parameters() if self.f0_encoder is not None else 0)
         )
         return trainable
 
@@ -351,18 +429,22 @@ class FullPersonalizedPipeline(nn.Module):
         )
 
     def forward_sequence(
-        self, z_seq: torch.Tensor
+        self, z_seq: torch.Tensor, f0_seq: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Process full temporal sequence of continuous codec latents.
 
         Args:
             z_seq: Input continuous latent tensor of shape (batch, 128, time).
+            f0_seq: Optional 3D F0 feature tensor of shape (batch, 3, time).
 
         Returns:
             Tuple of (z_adapted, c_seq, p_seq) where z_adapted has shape
             (batch, 128, time).
         """
         c_seq = self.cleanser.forward_sequence(z_seq)
+        if self.f0_encoder is not None and f0_seq is not None:
+            gamma, beta = self.f0_encoder(f0_seq)
+            c_seq = (1.0 + gamma) * c_seq + beta
         p_seq = self.prosody_head.forward_sequence(z_seq)
         u_seq = self.fusion(c_seq, p_seq)
         z_adapted = self.adapter.forward_sequence(u_seq)
@@ -372,12 +454,14 @@ class FullPersonalizedPipeline(nn.Module):
         self,
         audio_chunk: torch.Tensor,
         state: PipelineStreamingState | None = None,
+        f0_chunk: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, PipelineStreamingState]:
         """Execute single end-to-end streaming step (320 samples -> 320 samples).
 
         Args:
             audio_chunk: Raw PCM audio chunk (batch, 1, 320).
             state: Pipeline streaming state container.
+            f0_chunk: Optional single-frame 3D F0 tensor (batch, 3, 1).
 
         Returns:
             Tuple of (converted_audio_chunk, next_state) where converted chunk
@@ -397,6 +481,10 @@ class FullPersonalizedPipeline(nn.Module):
         c_chunk, next_cleanser_state = self.cleanser.forward_chunk(
             z_chunk, state.cleanser_state
         )
+        if self.f0_encoder is not None and f0_chunk is not None:
+            gamma, beta = self.f0_encoder(f0_chunk)
+            c_chunk = (1.0 + gamma) * c_chunk + beta
+
         p_chunk, next_prosody_state = self.prosody_head.forward_chunk(
             z_chunk, state.prosody_state
         )

@@ -167,24 +167,29 @@ class AdapterTrainer:
         self.stft_loss = MultiScaleSTFTLoss().to(self.device)
         self.latent_loss = LatentLoss().to(self.device)
 
-        # Only train adapter and prosody head parameters
+        # Train adapter, prosody head, fusion, and optional F0 encoder
         trainable = (
             list(self.pipeline.adapter.parameters())
             + list(self.pipeline.prosody_head.parameters())
             + list(self.pipeline.fusion.parameters())
         )
+        if self.pipeline.f0_encoder is not None:
+            trainable += list(self.pipeline.f0_encoder.parameters())
+
         self.optimizer = AdamW(trainable, lr=lr, weight_decay=weight_decay)
 
     def train_step(
         self,
         target_audio_24k: torch.Tensor,
         mask: torch.Tensor | None = None,
+        f0_3d: torch.Tensor | None = None,
     ) -> dict[str, float]:
         """Perform one optimization step on target persona data.
 
         Args:
             target_audio_24k: Ground-truth target audio of shape (batch, num_samples).
             mask: Optional frame valid mask.
+            f0_3d: Optional 3D normalized F0 tensor of shape (batch, 3, num_frames).
 
         Returns:
             Dictionary of step loss metrics. Returns zeros on OOM skip.
@@ -198,13 +203,15 @@ class AdapterTrainer:
         else:
             audio_in = audio
 
+        f0_in = f0_3d.to(self.device) if f0_3d is not None else None
+
         codec_model: Any = self.pipeline.codec.model
         # 1. Encode target audio with frozen EnCodec encoder
         with torch.no_grad():
             z_target = codec_model.encoder(audio_in)
 
         # 2. Pipeline transformation sequence
-        z_adapted, _, _ = self.pipeline.forward_sequence(z_target)
+        z_adapted, _, _ = self.pipeline.forward_sequence(z_target, f0_seq=f0_in)
 
         # 3. Decode adapted latent back to audio
         y_recon = codec_model.decoder(z_adapted).squeeze(1)

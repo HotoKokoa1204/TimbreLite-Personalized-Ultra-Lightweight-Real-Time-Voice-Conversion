@@ -37,6 +37,8 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
         codec_sr: int = 24000,
         teacher_sr: int = 16000,
         load_features: bool = True,
+        load_f0: bool = False,
+        f0_dir: str | Path | None = None,
     ) -> None:
         """Initialize VoiceConversionDataset.
 
@@ -48,6 +50,8 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
             codec_sr: Sampling rate for 24kHz codec audio.
             teacher_sr: Sampling rate for 16kHz teacher audio.
             load_features: Whether to attempt loading cached teacher .pt tensors.
+            load_f0: Whether to load precomputed 3D F0 features.
+            f0_dir: Optional directory containing cached _f0.pt files.
         """
         super().__init__()
         self.manifest_path = Path(manifest_path)
@@ -59,6 +63,8 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
         self.codec_sr = codec_sr
         self.teacher_sr = teacher_sr
         self.load_features = load_features
+        self.load_f0 = load_f0
+        self.f0_dir = Path(f0_dir) if f0_dir is not None else None
 
         self.crop_samples_24k: int | None = (
             int(crop_sec * codec_sr) if crop_sec is not None else None
@@ -79,7 +85,7 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
 
         Returns:
             Dictionary containing 'id', 'audio_24k', 'audio_16k', 'duration_sec',
-            and optional 'teacher_features'.
+            and optional 'teacher_features' / 'f0_3d'.
         """
         item = self.records[idx]
         sample_id = str(item["id"])
@@ -88,13 +94,32 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
 
         # Load audio waveforms
         audio_24k, _ = load_audio(audio_24k_path, target_sr=self.codec_sr)
-        audio_16k, _ = load_audio(audio_16k_path, target_sr=self.teacher_sr)
+        if self.load_features:
+            audio_16k, _ = load_audio(audio_16k_path, target_sr=self.teacher_sr)
+        else:
+            audio_16k = torch.zeros(1, dtype=torch.float32)
 
         teacher_features: torch.Tensor | None = None
         if self.load_features and "teacher_features_path" in item:
             feat_path = Path(str(item["teacher_features_path"]))
             if feat_path.is_file():
                 teacher_features = torch.load(feat_path, weights_only=True)
+
+        f0_3d: torch.Tensor | None = None
+        if self.load_f0:
+            stem = Path(audio_24k_path).stem
+            cand_paths: list[Path] = []
+            if self.f0_dir is not None:
+                cand_paths.append(self.f0_dir / f"{stem}_f0.pt")
+            cand_paths.extend([
+                Path("data/features/f0/hu_tao") / f"{stem}_f0.pt",
+                Path("data/features/f0/my_voice") / f"{stem}_f0.pt",
+            ])
+            for cp in cand_paths:
+                if cp.is_file():
+                    loaded_f0 = torch.load(cp, weights_only=False)
+                    f0_3d = loaded_f0["f0_3d"]
+                    break
 
         total_samples_24k = len(audio_24k)
 
@@ -117,15 +142,19 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
             offset_16k = int(round(offset_24k * (self.teacher_sr / self.codec_sr)))
 
             audio_24k = audio_24k[offset_24k : offset_24k + crop_len_24k]
-            audio_16k = audio_16k[offset_16k : offset_16k + crop_len_16k]
+            if self.load_features:
+                audio_16k = audio_16k[offset_16k : offset_16k + crop_len_16k]
+
+            offset_frames = offset_24k // 320
+            num_frames = crop_len_24k // 320
 
             if teacher_features is not None:
-                # Teacher features are aligned at 75Hz (hop = 320 samples at 24k)
-                offset_frames = offset_24k // 320
-                num_frames = crop_len_24k // 320
                 teacher_features = teacher_features[
                     :, offset_frames : offset_frames + num_frames
                 ]
+
+            if f0_3d is not None:
+                f0_3d = f0_3d[:, offset_frames : offset_frames + num_frames]
 
         result: dict[str, Any] = {
             "id": sample_id,
@@ -136,6 +165,9 @@ class VoiceConversionDataset(Dataset[dict[str, Any]]):
 
         if teacher_features is not None:
             result["teacher_features"] = teacher_features
+
+        if f0_3d is not None:
+            result["f0_3d"] = f0_3d
 
         return result
 
@@ -187,5 +219,15 @@ def collate_voice_batch(batch: list[dict[str, Any]]) -> dict[str, Any]:
 
         result["teacher_features"] = padded_feat
         result["mask"] = mask
+
+    # If 3D F0 features are present across batch, pad them
+    has_f0 = all("f0_3d" in b for b in batch)
+    if has_f0:
+        max_f0_frames = max(b["f0_3d"].shape[-1] for b in batch)
+        padded_f0 = torch.zeros(batch_size, 3, max_f0_frames, dtype=torch.float32)
+        for i, b in enumerate(batch):
+            f_len = b["f0_3d"].shape[-1]
+            padded_f0[i, :, :f_len] = b["f0_3d"]
+        result["f0_3d"] = padded_f0
 
     return result

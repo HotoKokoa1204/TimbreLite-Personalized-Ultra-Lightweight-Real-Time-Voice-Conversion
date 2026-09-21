@@ -47,3 +47,27 @@ Initial end-to-end voice conversion experiments (Epoch 82) produced a low-pitche
 - Completely eliminates pitch ambiguity from the content cleanser and adapter.
 - Isolates pitch conversion ($91.62\text{ Hz} \to 326.12\text{ Hz}$, $\approx +21.98\text{ semitones}$) from timbre/formant conversion.
 - Enables EXP-1A statistical verification before retrained model ablation.
+
+## EXP-1B Empirical Results (2026-09-21)
+
+Controlled 50-epoch 3-way ablation (all starting from Stage-2 Epoch-82, seed=42, batch=8) over 50
+source validation utterances confirmed the following:
+
+| Condition | Hu Tao Cosine Sim | Target Mel L₁ | Spectral Centroid | Whisper CER |
+|:----------|:-----------------:|:-------------:|:-----------------:|:-----------:|
+| A_pretrained (Epoch 82) | 0.7498 | 2.1794 | 2925 Hz | 1.252 |
+| A-control (50 ep, no F0) | 0.7567 | 2.1734 | 2930 Hz | 1.298 |
+| Model B (+ F0 FiLM) | 0.7550 | 2.1837 | 2926 Hz | 1.295 |
+| Model C (+ F0 FiLM, gated skip σ≈1.9%) | **0.7828** | **1.7332** | **3502 Hz** | 1.508 |
+
+**H1 (F0 Alignment) FAILED**: FiLM conditioning alone cannot bridge the 22-semitone register gap.
+The static skip connection carries the source fundamental through the decoder unchanged.
+
+**H2 (Linguistic Preservation) PASSED**: ΔCER(B−A) = −0.003 (< 5% bound).
+
+**H3 (Skip Suppression) PASSED**: Gated skip with σ≈1.9% reduces target Mel L₁ by 20.6% and
+raises spectral centroid by +576 Hz toward Hu Tao's register.
+
+**EXP-2 Direction**: The static bypass is the fundamental bottleneck. Target-only synthesis
+(decoupled renderer) or scheduled gate annealing (α: −4.0 → −8.0 over 100 epochs) is required
+to achieve cross-register conversion. See [`docs/experiments/exp-1b-explicit-f0-ablation.md`](../experiments/exp-1b-explicit-f0-ablation.md).

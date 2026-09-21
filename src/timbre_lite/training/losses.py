@@ -101,7 +101,7 @@ class MultiScaleSTFTLoss(nn.Module):
         self.losses = nn.ModuleList(
             [
                 STFTLoss(n_fft=f, hop_length=h, win_length=w)
-                for f, h, w in zip(fft_sizes, hop_sizes, win_lengths, strict=True)
+                for f, h, w in zip(fft_sizes, hop_sizes, win_lengths)
             ]
         )
 

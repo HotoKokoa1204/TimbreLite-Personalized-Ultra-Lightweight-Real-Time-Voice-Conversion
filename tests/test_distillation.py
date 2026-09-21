@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-
 from timbre_lite.distillation.alignment import align_teacher_features
 from timbre_lite.distillation.loss import DistillationLoss, DistillationProjectionHead
 from timbre_lite.distillation.teacher import ContentVecTeacher
@@ -81,6 +80,18 @@ def test_distillation_loss_calculation() -> None:
     assert loss_masked > 0.0
 
 
+def _torch_lt_26() -> bool:
+    ver = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+    return ver < (2, 6)
+
+
+@pytest.mark.skipif(
+    _torch_lt_26(),
+    reason=(
+        "ContentVecTeacher requires torch>=2.6 "
+        "(CVE-2025-32434 safeguard in transformers)"
+    ),
+)
 def test_contentvec_teacher_cpu_extraction() -> None:
     """Verify ContentVecTeacher extraction runs correctly on CPU device."""
     teacher = ContentVecTeacher(device="cpu")
