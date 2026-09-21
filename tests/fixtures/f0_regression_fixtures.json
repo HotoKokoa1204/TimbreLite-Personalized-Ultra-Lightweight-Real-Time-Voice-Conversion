@@ -15,6 +15,8 @@
     "reference_oracle_median_hz": 78.2,
     "expected_f0_min_hz": 73.0,
     "expected_f0_max_hz": 90.0,
-    "disallowed_harmonic_hz": 156.4
+    "disallowed_harmonic_hz": 156.4,
+    "status": "F0_REGRESSION_WARNING",
+    "note": "Monitored for local pitch estimation bias (+10.4% vs PyIN oracle, 86.8 Hz vs 78.6 Hz)"
   }
 }
